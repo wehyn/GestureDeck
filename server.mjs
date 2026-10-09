@@ -10,6 +10,9 @@ const publicDirectories = [
   'src/',
   'assets/',
   'node_modules/@mediapipe/tasks-vision/',
+  'node_modules/pdfjs-dist/build/',
+  'node_modules/pdfjs-dist/cmaps/',
+  'node_modules/pdfjs-dist/standard_fonts/',
 ];
 
 const contentTypes = new Map([
@@ -19,6 +22,7 @@ const contentTypes = new Map([
   ['.mjs', 'text/javascript; charset=utf-8'],
   ['.json', 'application/json; charset=utf-8'],
   ['.wasm', 'application/wasm'],
+  ['.bcmap', 'application/octet-stream'],
   ['.task', 'application/octet-stream'],
   ['.svg', 'image/svg+xml'],
   ['.png', 'image/png'],

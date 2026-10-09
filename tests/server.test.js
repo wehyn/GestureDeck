@@ -36,6 +36,35 @@ test('served app shell loads the client controller module', async () => {
   }
 });
 
+test('development server exposes only the required PDF.js runtime assets', async () => {
+  const server = createAppServer();
+  try {
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const origin = `http://127.0.0.1:${server.address().port}`;
+
+    for (const route of [
+      '/node_modules/pdfjs-dist/build/pdf.mjs',
+      '/node_modules/pdfjs-dist/build/pdf.worker.mjs',
+      '/node_modules/pdfjs-dist/cmaps/78-EUC-H.bcmap',
+      '/node_modules/pdfjs-dist/standard_fonts/FoxitSerif.pfb',
+    ]) {
+      const response = await fetch(`${origin}${route}`);
+      assert.equal(response.status, 200, `${route} should be served`);
+      if (route.endsWith('.bcmap')) {
+        assert.equal(response.headers.get('content-type'), 'application/octet-stream');
+      }
+      await response.body?.cancel();
+    }
+
+    const packageMetadata = await fetch(`${origin}/node_modules/pdfjs-dist/package.json`);
+    assert.equal(packageMetadata.status, 404);
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
+});
+
 test('development server exposes app assets but not project documentation', async () => {
   const root = await mkdtemp(path.join(scratch, 'gesturedeck-server-'));
   await mkdir(path.join(root, 'assets'));
