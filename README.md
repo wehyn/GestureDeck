@@ -1,6 +1,6 @@
 # GestureDeck
 
-**A local-first swipe remote for the built-in browser sample deck.** GestureDeck tracks hand movement through your webcam and uses left/right swipes to navigate slides. It is a browser prototype; it does not control Keynote or another native presentation app.
+**A local-first swipe remote for the built-in browser sample deck or your own PDF.** GestureDeck tracks hand movement through your webcam and uses left/right swipes to navigate pages. It is a browser prototype; it does not control Keynote or another native presentation app.
 
 ## Team members
 
@@ -14,7 +14,7 @@
 - A Node.js development server bound to `127.0.0.1` (loopback only).
 - Camera capture, after you explicitly start setup or a session.
 - MediaPipe hand-landmark inference and swipe recognition in the browser, using the model and WebAssembly runtime served from local project files.
-- The sample slide deck, hand-skeleton preview, and gesture settings. Settings are saved in this browser on this device.
+- The sample slide deck, imported PDF rendering, hand-skeleton preview, and gesture settings. Settings are saved in this browser on this device; imported PDFs are kept only in memory for the current page session.
 
 Camera frames and hand landmarks are not uploaded or saved. The camera is off until you choose to start it, and stopping the session releases the camera.
 
@@ -23,7 +23,7 @@ Camera frames and hand landmarks are not uploaded or saved. The camera is off un
 - Cloning or pushing this repository to GitHub.
 - The initial `npm install` when the required package is not already available in the local npm cache.
 
-After dependencies are installed, the sample deck and hand tracking can run offline. The hand model is included in this repository, and the MediaPipe runtime and WASM files are served locally; the app does not call a cloud inference API.
+After dependencies are installed, the sample deck, PDF import, and hand tracking can run offline. The hand model is included in this repository, and the MediaPipe and PDF.js runtimes are served locally; the app does not call a cloud inference API. PDF files and rendered pages are not uploaded or saved by GestureDeck.
 
 ## Hand-tracking model
 
@@ -38,6 +38,7 @@ Model source: [MediaPipe Hand Landmarker float16 model](https://storage.googleap
 - HTML, CSS, and vanilla JavaScript ES modules for the interface and client logic (no frontend framework).
 - Node.js 20+ and its built-in HTTP server for loopback-only local serving.
 - MediaPipe Tasks Vision 0.10.33 and WebAssembly for local hand tracking.
+- PDF.js (`pdfjs-dist` 4.10.38) for local PDF page rendering.
 - Browser APIs including `getUserMedia`, canvas, and `localStorage`.
 - Node.js built-in test runner for automated tests.
 
@@ -59,9 +60,11 @@ npm run dev
 
 Open `http://127.0.0.1:5173`.
 
+To show your own presentation, click **Open PDF** and choose an unprotected `.pdf` file. Each page becomes a slide. Use the on-screen Previous/Next buttons, the left/right arrow keys, or the same swipe gestures after starting a session. Click **Back to sample deck** to return to the built-in example. Password-protected PDFs are not supported in this version. GestureDeck does not upload or store the PDF.
+
 ## Current prototype boundary
 
-The browser prototype controls only its built-in sample slide deck. A browser page cannot safely send keyboard events to a separate native Keynote process, so the macOS/Keynote target described in `spec.md` remains a platform-specific adapter to implement and test on macOS. The app must not imply that Keynote is connected when it is not.
+The browser prototype controls its built-in sample slide deck or an imported PDF inside GestureDeck. A browser page cannot safely send keyboard events to a separate native Keynote process, so the macOS/Keynote target described in `spec.md` remains a platform-specific adapter to implement and test on macOS. The app must not imply that Keynote is connected when it is not.
 
 ## Privacy and local model notes
 

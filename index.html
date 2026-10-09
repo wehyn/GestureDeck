@@ -63,19 +63,27 @@
           <section class="deck-panel" aria-labelledby="deck-heading">
             <div class="panel-heading deck-heading-row">
               <div>
-                <p class="eyebrow">SAMPLE DECK</p>
+                <p id="deck-eyebrow" class="eyebrow">SAMPLE DECK</p>
                 <h2 id="deck-heading">Field notes on presence</h2>
               </div>
-              <span class="deck-format"><span class="format-dot" aria-hidden="true"></span> Browser · Sample deck</span>
+              <div class="deck-heading-actions">
+                <span id="deck-format" class="deck-format"><span class="format-dot" aria-hidden="true"></span><span id="deck-format-label">Browser · Sample deck</span></span>
+                <button id="open-pdf" class="button button-secondary deck-file-button" type="button">Open PDF</button>
+                <button id="sample-deck" class="button button-secondary deck-file-button" type="button" hidden>Back to sample deck</button>
+                <input id="pdf-file" type="file" accept=".pdf,application/pdf" hidden aria-label="Choose a PDF presentation">
+              </div>
             </div>
 
+            <p id="pdf-status" class="pdf-status" role="status" aria-live="polite" hidden></p>
+            <p id="pdf-error" class="pdf-error" role="alert" hidden></p>
+
             <div id="deck-visual" class="slide-canvas" role="group" aria-labelledby="slide-title" aria-describedby="slide-copy">
-              <div class="canvas-topline">
+              <div id="sample-canvas-topline" class="canvas-topline">
                 <span class="canvas-wordmark">GESTUREDECK <span>/</span> STUDIO NOTES</span>
                 <span class="canvas-edition">A FIELD GUIDE&nbsp;&nbsp;·&nbsp;&nbsp;2026</span>
               </div>
 
-              <div class="canvas-content">
+              <div id="sample-canvas-content" class="canvas-content">
                 <div class="canvas-copy">
                   <span id="slide-accent" class="slide-accent" aria-hidden="true"></span>
                   <p id="slide-kicker" class="slide-kicker">A FIELD GUIDE TO PRESENCE</p>
@@ -91,9 +99,12 @@
                 </div>
               </div>
 
-              <div class="canvas-footer">
+              <div id="sample-canvas-footer" class="canvas-footer">
                 <span>BETTER STORIES, LESS SCREEN TIME</span>
                 <span class="canvas-footer-mark" aria-hidden="true">GD&nbsp;—&nbsp;01</span>
+              </div>
+              <div id="pdf-stage" class="pdf-stage" hidden>
+                <canvas id="pdf-page" class="pdf-page-canvas" role="img" aria-label="PDF presentation page"></canvas>
               </div>
             </div>
 

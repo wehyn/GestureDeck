@@ -9,6 +9,15 @@ export class PresentationController {
     this.#slides = slides;
   }
 
+  setSlides(slides) {
+    if (!Array.isArray(slides) || slides.length === 0) {
+      throw new TypeError('A presentation requires at least one slide.');
+    }
+    this.#slides = slides;
+    this.#index = 0;
+    return this.getSnapshot();
+  }
+
   getSnapshot() {
     return {
       index: this.#index,

@@ -47,14 +47,14 @@ Teachers, speakers, workshop facilitators, and product demonstrators who present
 
 ### Demo assumptions
 
-The proposed native demo targets one Mac, one built-in or USB webcam, one presenter, one hand, and Keynote in slideshow mode. The app must be useful without internet access. Other operating systems and presentation apps are follow-up adapters, not MVP requirements. Keynote integration is a proposal and still needs implementation and testing. The current repository prototype controls only its built-in browser sample deck; it does not send slide keys to Keynote or another presentation app.
+The proposed native demo targets one Mac, one built-in or USB webcam, one presenter, one hand, and Keynote in slideshow mode. The app must be useful without internet access. Other operating systems and presentation apps are follow-up adapters, not MVP requirements. Keynote integration is a proposal and still needs implementation and testing. The current repository prototype controls its built-in browser sample deck or an imported PDF; it does not send slide keys to Keynote or another presentation app.
 
 ## 3. Core experience
 
 1. **Open GestureDeck.** Camera remains off. The idle screen says: “Camera off. Nothing is being captured.”
 2. **Set up.** The user explicitly starts camera setup, selects a camera, grants required OS permissions, and sees why each permission is needed.
 3. **Frame and test.** After the user explicitly starts setup, a live preview shows the camera feed and a local hand-skeleton overlay visualizes detected landmarks. The user can try both swipes against the sample UI—no external slide keys are sent during setup.
-4. **Prepare the target.** In the proposed native-Keynote flow, the user opens Keynote, starts the slideshow, selects Keynote, and confirms preflight. The current browser prototype uses its built-in sample deck.
+4. **Prepare the target.** In the proposed native-Keynote flow, the user opens Keynote, starts the slideshow, selects Keynote, and confirms preflight. The current browser prototype uses its built-in sample deck or an imported PDF.
 5. **Start session.** After both gesture tests are confirmed, the user explicitly starts live mode. Camera access begins only after **Start setup** and continues from setup into the live session. A persistent status identifies live mode, camera state, local processing, and target.
 6. **Present.** A detected swipe triggers exactly one next/previous action. The live camera preview remains visible by default; a control hides or restores the preview and hand-skeleton overlay. Brief feedback confirms each action.
 7. **Pause or stop.** Pause immediately closes the camera stream but keeps settings. Resume requires an explicit action. Stop ends the session and releases the camera.
@@ -155,13 +155,13 @@ Use at least five testers, varying hand size, dominant hand, skin tone, presenta
 | Permission setup derails the demo | Rehearse the permission flow and keep a no-camera sample mode for testing the UI and key-routing path. |
 | Camera use feels opaque | Off-by-default behavior, persistent indicator, exact status copy, and explicit Pause/Stop. |
 
-## 11. Hackathon demo script
+## 11. Hackathon demo script for the current browser prototype
 
 1. Open GestureDeck and show “Camera off. Nothing is being captured.”
 2. Start setup, demonstrate local hand detection, and test both gestures without touching the real deck.
-3. Start a Keynote slideshow and explicitly start the session.
-4. Swipe left to advance and right to go back; show the brief action confirmations.
-5. Switch focus away from Keynote and show that GestureDeck suppresses actions.
+3. Open a PDF presentation in GestureDeck, then explicitly start the session.
+4. Swipe left to advance PDF pages and right to go back; show the brief action confirmations.
+5. Switch focus away from the GestureDeck browser tab and show that GestureDeck suppresses gesture actions.
 6. Pause and show the camera-off state; resume, then Stop and show that capture ends.
 7. Close with the value: no clicker, no internet requirement, and no video saved or uploaded.
 

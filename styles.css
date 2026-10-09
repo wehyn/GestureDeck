@@ -317,6 +317,29 @@ h1 {
   margin-bottom: 22px;
 }
 
+.deck-heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.deck-file-button {
+  min-height: 32px;
+  padding-inline: 11px;
+  font-size: 11px;
+}
+
+.pdf-status,
+.pdf-error {
+  margin: -10px 0 14px;
+  font-size: 12px;
+}
+
+.pdf-status { color: var(--muted); }
+.pdf-error { color: #a13d34; }
+
 .panel-heading .eyebrow,
 .gesture-guide .eyebrow {
   margin-bottom: 5px;
@@ -366,6 +389,29 @@ h1 {
   background:
     radial-gradient(circle at 88% 6%, rgb(255 255 255 / 48%), transparent 24%),
     #eee8dc;
+}
+
+.slide-canvas[data-source="pdf"] {
+  padding: 0;
+  background: #e8e9e6;
+}
+
+.pdf-stage {
+  position: absolute;
+  inset: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.pdf-page-canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  background: white;
+  box-shadow: 0 3px 18px rgb(30 30 30 / 12%);
 }
 
 .canvas-topline,
@@ -1541,6 +1587,10 @@ body[data-session-state="error"] .state-dot {
     flex-direction: column;
     gap: 10px;
     margin-bottom: 16px;
+  }
+
+  .deck-heading-actions {
+    justify-content: flex-start;
   }
 
   .deck-format {

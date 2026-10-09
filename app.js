@@ -3,6 +3,7 @@ import { defaultPreviewVisibility, renderCameraPreview } from './src/camera-prev
 import { drawHandOverlay } from './src/hand-overlay.js';
 import { extractHandSample, updateRecognizerWithHandSample } from './src/hand-tracking.js';
 import { createLocalHandLandmarker } from './src/local-hand-tracker.js';
+import { openPdfPresentation } from './src/pdf-presentation.js';
 import { PresentationController } from './src/presentation.js';
 import { SwipeRecognizer } from './src/gesture-engine.js';
 
@@ -60,6 +61,19 @@ const elements = {
   leftGestureResult: $('left-gesture-result'),
   rightGestureResult: $('right-gesture-result'),
   resetSettings: $('reset-settings'),
+  openPdf: $('open-pdf'),
+  pdfFile: $('pdf-file'),
+  sampleDeck: $('sample-deck'),
+  pdfStatus: $('pdf-status'),
+  pdfError: $('pdf-error'),
+  pdfStage: $('pdf-stage'),
+  pdfPage: $('pdf-page'),
+  deckHeading: $('deck-heading'),
+  deckEyebrow: $('deck-eyebrow'),
+  deckFormatLabel: $('deck-format-label'),
+  sampleCanvasTopline: $('sample-canvas-topline'),
+  sampleCanvasContent: $('sample-canvas-content'),
+  sampleCanvasFooter: $('sample-canvas-footer'),
 };
 
 const slides = [
@@ -113,6 +127,12 @@ const state = {
   cameraDeviceId: savedSettings.cameraDeviceId,
   cameraChoicesAvailable: false,
   toastTimer: null,
+  pdf: null,
+  pdfName: '',
+  pdfImportToken: 0,
+  pdfRenderToken: 0,
+  pdfRendering: false,
+  lastRenderedPdfIndex: 0,
 };
 
 if (elements.cameraPreview) {
@@ -304,18 +324,112 @@ function updatePreviewVisibility() {
   }
 }
 
-function renderSlide() {
+function setPdfStatus(message) {
+  setText(elements.pdfStatus, message ?? '');
+  show(elements.pdfStatus, Boolean(message));
+}
+
+function setPdfError(message) {
+  setText(elements.pdfError, message ?? '');
+  show(elements.pdfError, Boolean(message));
+}
+
+function pdfBounds() {
+  const stage = elements.pdfStage?.getBoundingClientRect?.();
+  const deck = elements.deckVisual?.getBoundingClientRect?.();
+  return {
+    width: stage?.width || Math.max(1, (deck?.width || elements.deckVisual?.clientWidth || 800) - 24),
+    height: stage?.height || Math.max(1, (deck?.height || elements.deckVisual?.clientHeight || 500) - 24),
+  };
+}
+
+function copyPdfCanvas(source) {
+  const target = elements.pdfPage;
+  if (!target) return;
+  target.width = source.width;
+  target.height = source.height;
+  target.style.width = source.style.width;
+  target.style.height = source.style.height;
+  target.getContext('2d')?.drawImage(source, 0, 0);
+}
+
+function clearPdfCanvas() {
+  if (!elements.pdfPage) return;
+  elements.pdfPage.width = 0;
+  elements.pdfPage.height = 0;
+  elements.pdfPage.style.width = '';
+  elements.pdfPage.style.height = '';
+}
+
+function renderSourceUi() {
+  const pdfActive = Boolean(state.pdf);
+  show(elements.sampleCanvasTopline, !pdfActive);
+  show(elements.sampleCanvasContent, !pdfActive);
+  show(elements.sampleCanvasFooter, !pdfActive);
+  show(elements.pdfStage, pdfActive);
+  show(elements.sampleDeck, pdfActive);
+  setText(elements.deckHeading, pdfActive ? state.pdfName : 'Field notes on presence');
+  setText(elements.deckEyebrow, pdfActive ? 'YOUR PDF' : 'SAMPLE DECK');
+  setText(elements.deckFormatLabel, pdfActive ? 'PDF · Local file' : 'Browser · Sample deck');
+  setText(elements.targetStatus, pdfActive ? 'Imported PDF · browser demo' : 'Sample deck · browser demo');
+  if (elements.deckVisual) {
+    elements.deckVisual.dataset.source = pdfActive ? 'pdf' : 'sample';
+    if (pdfActive) {
+      elements.deckVisual.removeAttribute?.('aria-labelledby');
+      elements.deckVisual.removeAttribute?.('aria-describedby');
+      elements.deckVisual.setAttribute('aria-label', `${state.pdfName}, page ${presentation.getSnapshot().index + 1} of ${state.pdf.numPages}`);
+    } else {
+      elements.deckVisual.removeAttribute?.('aria-label');
+      elements.deckVisual.setAttribute('aria-labelledby', 'slide-title');
+      elements.deckVisual.setAttribute('aria-describedby', 'slide-copy');
+    }
+  }
+}
+
+async function renderPdfPage(index) {
+  if (!state.pdf) return;
+  const pdf = state.pdf;
+  const token = ++state.pdfRenderToken;
+  state.pdfRendering = true;
+  renderSlide({ renderPdf: false });
+  setPdfStatus(`Rendering page ${index + 1}…`);
+  const canvas = document.createElement('canvas');
+  try {
+    const rendered = await pdf.renderPage(index + 1, canvas, pdfBounds());
+    if (token !== state.pdfRenderToken || pdf !== state.pdf) return;
+    if (!rendered) throw new Error('The page could not be rendered.');
+    copyPdfCanvas(canvas);
+    state.lastRenderedPdfIndex = index;
+    setPdfStatus(null);
+    setPdfError(null);
+  } catch (error) {
+    if (token !== state.pdfRenderToken || pdf !== state.pdf) return;
+    presentation.goTo(state.lastRenderedPdfIndex);
+    setPdfError(error?.message || 'This PDF page could not be displayed.');
+    setPdfStatus(null);
+  } finally {
+    if (token === state.pdfRenderToken) {
+      state.pdfRendering = false;
+      renderSlide({ renderPdf: false });
+    }
+  }
+}
+
+function renderSlide({ renderPdf = true } = {}) {
   const { index, total, slide } = presentation.getSnapshot();
+  renderSourceUi();
   setText(elements.slideNumber, String(index + 1).padStart(2, '0'));
   setText(elements.slideCount, String(total).padStart(2, '0'));
-  setText(elements.slideKicker, slide.kicker);
-  setText(elements.slideTitle, slide.title);
-  setText(elements.slideCopy, slide.copy);
-  if (elements.deckVisual) {
-    elements.deckVisual.dataset.motif = slide.motif;
-    elements.deckVisual.dataset.accent = slide.accent;
+  if (!state.pdf) {
+    setText(elements.slideKicker, slide.kicker);
+    setText(elements.slideTitle, slide.title);
+    setText(elements.slideCopy, slide.copy);
+    if (elements.deckVisual) {
+      elements.deckVisual.dataset.motif = slide.motif;
+      elements.deckVisual.dataset.accent = slide.accent;
+    }
+    if (elements.slideAccent) elements.slideAccent.dataset.accent = slide.accent;
   }
-  if (elements.slideAccent) elements.slideAccent.dataset.accent = slide.accent;
   if (elements.progressFill) {
     elements.progressFill.style.width = `${((index + 1) / total) * 100}%`;
   }
@@ -323,8 +437,9 @@ function renderSlide() {
     elements.progressTrack.setAttribute('aria-valuemax', String(total));
     elements.progressTrack.setAttribute('aria-valuenow', String(index + 1));
   }
-  if (elements.previousSlide) elements.previousSlide.disabled = index === 0;
-  if (elements.nextSlide) elements.nextSlide.disabled = index === total - 1;
+  if (elements.previousSlide) elements.previousSlide.disabled = index === 0 || state.pdfRendering;
+  if (elements.nextSlide) elements.nextSlide.disabled = index === total - 1 || state.pdfRendering;
+  if (state.pdf && renderPdf) void renderPdfPage(index);
 }
 
 function showGestureToast(message) {
@@ -338,6 +453,7 @@ function showGestureToast(message) {
 }
 
 export function announceAction(action, source = 'manual') {
+  if (state.pdfRendering) return;
   const before = presentation.getSnapshot().index;
   if (action === 'next') presentation.next();
   else presentation.previous();
@@ -654,6 +770,60 @@ function previousSlide() {
   if (presentation.getSnapshot().index > 0) announceAction('previous');
 }
 
+async function loadPdfFile(file) {
+  if (!file) return;
+  const token = ++state.pdfImportToken;
+  setPdfError(null);
+  setPdfStatus(`Opening ${file.name}…`);
+  let candidate = null;
+  try {
+    candidate = await openPdfPresentation(file);
+    const firstPage = document.createElement('canvas');
+    const rendered = await candidate.renderPage(1, firstPage, pdfBounds());
+    if (token !== state.pdfImportToken) {
+      await candidate.destroy();
+      return;
+    }
+    if (!rendered) throw new Error('The first PDF page could not be displayed.');
+
+    const previous = state.pdf;
+    state.pdf = candidate;
+    state.pdfName = file.name;
+    state.lastRenderedPdfIndex = 0;
+    state.pdfRendering = false;
+    state.pdfRenderToken += 1;
+    presentation.setSlides(Array.from({ length: candidate.numPages }, (_, index) => ({
+      type: 'pdf', pageNumber: index + 1,
+    })));
+    renderSlide({ renderPdf: false });
+    copyPdfCanvas(firstPage);
+    setPdfStatus(`${file.name} opened · ${candidate.numPages} ${candidate.numPages === 1 ? 'page' : 'pages'}`);
+    setPdfError(null);
+    if (previous) await previous.destroy();
+  } catch (error) {
+    if (candidate && candidate !== state.pdf) await candidate.destroy();
+    if (token === state.pdfImportToken) {
+      setPdfStatus(null);
+      setPdfError(error?.message || 'The PDF could not be opened.');
+    }
+  }
+}
+
+function restoreSampleDeck() {
+  state.pdfImportToken += 1;
+  state.pdfRenderToken += 1;
+  state.pdfRendering = false;
+  const previous = state.pdf;
+  state.pdf = null;
+  state.pdfName = '';
+  presentation.setSlides(slides);
+  clearPdfCanvas();
+  setPdfStatus(null);
+  setPdfError(null);
+  renderSlide();
+  if (previous) void previous.destroy();
+}
+
 function togglePreview() {
   if (state.mode !== 'live' || !camera.active) return;
   state.previewVisible = !state.previewVisible;
@@ -700,6 +870,13 @@ function resetSettings() {
 }
 
 function bindEvents() {
+  elements.openPdf?.addEventListener('click', () => elements.pdfFile?.click());
+  elements.pdfFile?.addEventListener('change', (event) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    void loadPdfFile(file);
+  });
+  elements.sampleDeck?.addEventListener('click', restoreSampleDeck);
   elements.startSetup?.addEventListener('click', () => startCapture('setup'));
   elements.compactStartSetup?.addEventListener('click', () => startCapture('setup'));
   elements.startSession?.addEventListener('click', () => {
@@ -740,6 +917,12 @@ function bindEvents() {
   });
 
   window.addEventListener('pagehide', () => {
+    state.pdfImportToken += 1;
+    state.pdfRenderToken += 1;
+    const pdf = state.pdf;
+    state.pdf = null;
+    if (pdf) void pdf.destroy();
+    clearPdfCanvas();
     ++state.startToken;
     stopFrameLoop();
     state.previewVisible = false;
@@ -749,7 +932,14 @@ function bindEvents() {
   });
 }
 
-if (elements.targetStatus) setText(elements.targetStatus, 'Sample deck · browser demo');
+if (typeof ResizeObserver !== 'undefined' && elements.deckVisual) {
+  const pdfResizeObserver = new ResizeObserver(() => {
+    if (state.pdf && !state.pdfRendering) void renderPdfPage(presentation.getSnapshot().index);
+  });
+  pdfResizeObserver.observe(elements.deckVisual);
+  window.addEventListener('pagehide', () => pdfResizeObserver.disconnect());
+}
+
 if (elements.sensitivity && Number.isFinite(state.distanceThreshold)) {
   elements.sensitivity.value = String(Math.round(state.distanceThreshold * 100));
   setText(elements.sensitivityValue, `${Math.round(state.distanceThreshold * 100)}%`);

@@ -36,3 +36,15 @@ test('goTo rejects non-integer and out-of-range slide indices', () => {
 test('controller requires at least one slide', () => {
   assert.throws(() => new PresentationController([]), TypeError);
 });
+
+test('setSlides replaces the deck and resets navigation', () => {
+  const deck = new PresentationController(slides);
+  deck.goTo(2);
+  const pages = [{ pageNumber: 1 }, { pageNumber: 2 }];
+  assert.deepEqual(deck.setSlides(pages), { index: 0, total: 2, slide: pages[0] });
+  assert.equal(deck.next().slide, pages[1]);
+  assert.equal(deck.next().index, 1);
+  assert.equal(deck.previous().index, 0);
+  assert.throws(() => deck.setSlides([]), TypeError);
+  assert.equal(deck.getSnapshot().total, 2);
+});
