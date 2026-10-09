@@ -70,6 +70,7 @@
                 <span id="deck-format" class="deck-format"><span class="format-dot" aria-hidden="true"></span><span id="deck-format-label">Browser · Sample deck</span></span>
                 <button id="open-pdf" class="button button-secondary deck-file-button" type="button">Open PDF</button>
                 <button id="sample-deck" class="button button-secondary deck-file-button" type="button" hidden>Back to sample deck</button>
+                <button id="enter-pdf-fullscreen" class="button button-secondary deck-file-button" type="button" hidden>Present fullscreen</button>
                 <input id="pdf-file" type="file" accept=".pdf,application/pdf" hidden aria-label="Choose a PDF presentation">
               </div>
             </div>
@@ -105,6 +106,12 @@
               </div>
               <div id="pdf-stage" class="pdf-stage" hidden>
                 <canvas id="pdf-page" class="pdf-page-canvas" role="img" aria-label="PDF presentation page"></canvas>
+              </div>
+              <div id="pdf-fullscreen-toolbar" class="pdf-fullscreen-toolbar" role="group" aria-label="Fullscreen PDF controls" hidden>
+                <button id="fullscreen-previous" type="button" aria-label="Previous PDF page">Previous</button>
+                <span id="fullscreen-position" role="status" aria-live="polite" aria-atomic="true">1 / 1</span>
+                <button id="fullscreen-next" type="button" aria-label="Next PDF page">Next</button>
+                <button id="exit-pdf-fullscreen" type="button" aria-label="Exit fullscreen">Exit fullscreen</button>
               </div>
             </div>
 
