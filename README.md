@@ -1,13 +1,27 @@
 # GestureDeck
 
-**A local-first swipe remote for the built-in browser sample deck or your own PDF.** GestureDeck tracks hand movement through your webcam and uses left/right swipes to navigate pages. It is a browser prototype; it does not control Keynote or another native presentation app.
+GestureDeck is a local-first presentation controller that turns a webcam into a hands-free remote. Import a PDF, present it fullscreen, and use left and right hand swipes to move between pages. Hand tracking and swipe recognition run on the presenter's device, so camera frames aren't sent to a cloud AI service. The camera starts only when the presenter chooses setup and can be paused or stopped at any time.
 
-## Team members
+## Submission links
 
-- Harley Albert Buendia
-- Vienn Yzabel Babasa
-- Giann Garcia
-- Wayne Garcia
+| Submission item | Link |
+| --- | --- |
+| Public GitHub repository | [github.com/wehyn/GestureDeck](https://github.com/wehyn/GestureDeck) |
+| Demo video | [Watch on YouTube](https://youtu.be/KlBZ4BAcMwo?si=nWaqGRmpesDprLg5) |
+| LinkedIn video post | [View the post](https://lnkd.in/p/gQFs2FYi) |
+
+## Team
+
+**Team name:** Cantos Family
+
+- Vienn Yzabel C. Babasa
+- Harley Albert C. Buendia
+- Giann Ed Louise C. Garcia
+- Wayne Andrei C. Garcia
+
+## Why run the AI locally?
+
+Hand tracking needs a continuous camera feed and timely feedback during a presentation. Running the hand-landmark model on the presenter's device keeps video frames and hand landmarks off third-party servers, avoids a network round trip for each gesture, and lets the presentation work without internet access after setup. The browser asks for camera access only when the presenter starts setup; stopping the session releases the camera.
 
 ## What runs locally
 
@@ -22,10 +36,11 @@ Camera frames and hand landmarks are not uploaded or saved. The camera is off un
 
 - Cloning or pushing this repository to GitHub.
 - The initial `npm install` when the required package is not already available in the local npm cache.
+- Publishing or viewing the demo video and LinkedIn post.
 
 After dependencies are installed, the sample deck, PDF import, and hand tracking can run offline. The hand model is included in this repository, and the MediaPipe and PDF.js runtimes are served locally; the app does not call a cloud inference API. PDF files and rendered pages are not uploaded or saved by GestureDeck.
 
-## Hand-tracking model
+## Models used
 
 - **Model:** MediaPipe Hand Landmarker, float16 task model at `assets/hand_landmarker.task` (about 7.8 MB; bundled with the project).
 - **Runtime:** `@mediapipe/tasks-vision` 0.10.33, with its WebAssembly files loaded from the local `node_modules` directory.
@@ -42,9 +57,20 @@ Model source: [MediaPipe Hand Landmarker float16 model](https://storage.googleap
 - Browser APIs including `getUserMedia`, canvas, and `localStorage`.
 - Node.js built-in test runner for automated tests.
 
+## APIs and cloud services
+
+- **Runtime browser APIs:** `getUserMedia` for camera capture, Canvas for preview and PDF pages, the Fullscreen API for presenting, and `localStorage` for gesture settings.
+- **Runtime cloud services and hosted AI APIs:** None. Hand inference, swipe recognition, and PDF rendering run on the device. The app's HTTP server listens on `127.0.0.1` and serves local project files.
+- **Services used outside the running app:** GitHub hosts this public repository; npm may be needed to download dependencies during installation. YouTube hosts the demo video and LinkedIn hosts the video post; viewing them requires internet access.
+
+## Existing code and assets
+
+- The bundled `assets/hand_landmarker.task` is Google's [MediaPipe Hand Landmarker float16 model](https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task).
+- `@mediapipe/tasks-vision` 0.10.33 provides the third-party JavaScript and WebAssembly hand-tracking runtime. PDF.js (`pdfjs-dist` 4.10.38) provides PDF import and rendering in the browser. Their versions are pinned in `package.json` and `package-lock.json`.
+
 ## AI development tools
 
-- **OpenAI Codex through Hermes Agent** was used for AI-assisted development.
+- **OpenAI Codex through Hermes Agent** was used for AI-assisted planning, implementation, and documentation.
 - In the running app, the MediaPipe Hand Landmarker is the only AI/ML inference component. Codex and Hermes are development tools; the app does not send camera data to them or to a hosted AI service.
 
 ## Run locally
