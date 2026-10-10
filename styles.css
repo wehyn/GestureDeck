@@ -457,6 +457,10 @@ h1 {
   transition: opacity 180ms ease;
 }
 
+.pdf-fullscreen-toolbar[hidden] {
+  display: none;
+}
+
 .slide-canvas:not(:fullscreen) .pdf-fullscreen-toolbar {
   display: none;
 }

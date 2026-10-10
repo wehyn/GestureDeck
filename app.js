@@ -64,6 +64,12 @@ const elements = {
   openPdf: $('open-pdf'),
   pdfFile: $('pdf-file'),
   sampleDeck: $('sample-deck'),
+  enterPdfFullscreen: $('enter-pdf-fullscreen'),
+  pdfFullscreenToolbar: $('pdf-fullscreen-toolbar'),
+  fullscreenPrevious: $('fullscreen-previous'),
+  fullscreenPosition: $('fullscreen-position'),
+  fullscreenNext: $('fullscreen-next'),
+  exitPdfFullscreen: $('exit-pdf-fullscreen'),
   pdfStatus: $('pdf-status'),
   pdfError: $('pdf-error'),
   pdfStage: $('pdf-stage'),
@@ -133,6 +139,8 @@ const state = {
   pdfRenderToken: 0,
   pdfRendering: false,
   lastRenderedPdfIndex: 0,
+  fullscreenHideTimer: null,
+  wasPdfFullscreen: false,
 };
 
 if (elements.cameraPreview) {
@@ -361,6 +369,65 @@ function clearPdfCanvas() {
   elements.pdfPage.style.height = '';
 }
 
+function isPdfFullscreen() {
+  return document.fullscreenElement === elements.deckVisual;
+}
+
+function clearFullscreenToolbarTimer() {
+  if (state.fullscreenHideTimer !== null) clearTimeout(state.fullscreenHideTimer);
+  state.fullscreenHideTimer = null;
+}
+
+function revealFullscreenToolbar() {
+  if (!isPdfFullscreen()) return;
+  elements.deckVisual.dataset.toolbarVisible = 'true';
+  clearFullscreenToolbarTimer();
+  state.fullscreenHideTimer = setTimeout(() => {
+    if (!elements.pdfFullscreenToolbar.contains(document.activeElement)) {
+      elements.deckVisual.dataset.toolbarVisible = 'false';
+    }
+    state.fullscreenHideTimer = null;
+  }, 3000);
+}
+
+async function enterPdfFullscreen() {
+  if (!state.pdf) return;
+  if (!elements.deckVisual?.requestFullscreen) {
+    setPdfError('Fullscreen is unavailable in this browser.');
+    return;
+  }
+  setPdfError(null);
+  try {
+    await elements.deckVisual.requestFullscreen();
+  } catch {
+    setPdfError('Fullscreen could not start. Please try again.');
+  }
+}
+
+async function exitPdfFullscreen() {
+  if (!isPdfFullscreen()) return;
+  try {
+    await document.exitFullscreen();
+  } catch {
+    setPdfError('Fullscreen could not close. Press Escape to leave fullscreen.');
+  }
+}
+
+function syncPdfFullscreen() {
+  const active = isPdfFullscreen();
+  if (active === state.wasPdfFullscreen) return;
+  state.wasPdfFullscreen = active;
+  show(elements.pdfFullscreenToolbar, active);
+  if (active) {
+    revealFullscreenToolbar();
+  } else {
+    clearFullscreenToolbarTimer();
+    elements.deckVisual.dataset.toolbarVisible = 'false';
+    if (state.pdf) elements.enterPdfFullscreen?.focus({ preventScroll: true });
+  }
+  if (state.pdf) void renderPdfPage(presentation.getSnapshot().index);
+}
+
 function renderSourceUi() {
   const pdfActive = Boolean(state.pdf);
   show(elements.sampleCanvasTopline, !pdfActive);
@@ -368,6 +435,7 @@ function renderSourceUi() {
   show(elements.sampleCanvasFooter, !pdfActive);
   show(elements.pdfStage, pdfActive);
   show(elements.sampleDeck, pdfActive);
+  show(elements.enterPdfFullscreen, pdfActive);
   setText(elements.deckHeading, pdfActive ? state.pdfName : 'Field notes on presence');
   setText(elements.deckEyebrow, pdfActive ? 'YOUR PDF' : 'SAMPLE DECK');
   setText(elements.deckFormatLabel, pdfActive ? 'PDF · Local file' : 'Browser · Sample deck');
@@ -439,6 +507,9 @@ function renderSlide({ renderPdf = true } = {}) {
   }
   if (elements.previousSlide) elements.previousSlide.disabled = index === 0 || state.pdfRendering;
   if (elements.nextSlide) elements.nextSlide.disabled = index === total - 1 || state.pdfRendering;
+  setText(elements.fullscreenPosition, `${index + 1} / ${total}`);
+  if (elements.fullscreenPrevious) elements.fullscreenPrevious.disabled = index === 0 || state.pdfRendering;
+  if (elements.fullscreenNext) elements.fullscreenNext.disabled = index === total - 1 || state.pdfRendering;
   if (state.pdf && renderPdf) void renderPdfPage(index);
 }
 
@@ -785,6 +856,11 @@ async function loadPdfFile(file) {
       return;
     }
     if (!rendered) throw new Error('The first PDF page could not be displayed.');
+    await exitPdfFullscreen();
+    if (token !== state.pdfImportToken) {
+      await candidate.destroy();
+      return;
+    }
 
     const previous = state.pdf;
     state.pdf = candidate;
@@ -809,7 +885,8 @@ async function loadPdfFile(file) {
   }
 }
 
-function restoreSampleDeck() {
+async function restoreSampleDeck() {
+  await exitPdfFullscreen();
   state.pdfImportToken += 1;
   state.pdfRenderToken += 1;
   state.pdfRendering = false;
@@ -876,7 +953,14 @@ function bindEvents() {
     event.currentTarget.value = '';
     void loadPdfFile(file);
   });
-  elements.sampleDeck?.addEventListener('click', restoreSampleDeck);
+  elements.sampleDeck?.addEventListener('click', () => { void restoreSampleDeck(); });
+  elements.enterPdfFullscreen?.addEventListener('click', () => { void enterPdfFullscreen(); });
+  elements.exitPdfFullscreen?.addEventListener('click', () => { void exitPdfFullscreen(); });
+  elements.fullscreenPrevious?.addEventListener('click', previousSlide);
+  elements.fullscreenNext?.addEventListener('click', nextSlide);
+  elements.deckVisual?.addEventListener('pointermove', revealFullscreenToolbar);
+  elements.pdfFullscreenToolbar?.addEventListener('focusin', revealFullscreenToolbar);
+  document.addEventListener('fullscreenchange', syncPdfFullscreen);
   elements.startSetup?.addEventListener('click', () => startCapture('setup'));
   elements.compactStartSetup?.addEventListener('click', () => startCapture('setup'));
   elements.startSession?.addEventListener('click', () => {
@@ -906,7 +990,8 @@ function bindEvents() {
 
   document.addEventListener('keydown', (event) => {
     if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
-    if (event.target?.closest?.('input, button, select, textarea, [contenteditable="true"]')) return;
+    if (event.target?.closest?.('input, select, textarea, [contenteditable="true"]')) return;
+    if (event.target?.closest?.('button') && !(isPdfFullscreen() && event.target.closest('#pdf-fullscreen-toolbar'))) return;
     if (event.key === 'ArrowRight') {
       event.preventDefault();
       nextSlide();
@@ -917,6 +1002,7 @@ function bindEvents() {
   });
 
   window.addEventListener('pagehide', () => {
+    clearFullscreenToolbarTimer();
     state.pdfImportToken += 1;
     state.pdfRenderToken += 1;
     const pdf = state.pdf;

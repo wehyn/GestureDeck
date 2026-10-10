@@ -60,7 +60,7 @@ npm run dev
 
 Open `http://127.0.0.1:5173`.
 
-To show your own presentation, click **Open PDF** and choose an unprotected `.pdf` file. Each page becomes a slide. Use the on-screen Previous/Next buttons, the left/right arrow keys, or the same swipe gestures after starting a session. Click **Back to sample deck** to return to the built-in example. Password-protected PDFs are not supported in this version. GestureDeck does not upload or store the PDF.
+To show your own presentation, click **Open PDF** and choose an unprotected `.pdf` file. Each page becomes a slide. Click **Present fullscreen** to fill the browser display; browsers require this click before entering fullscreen. The Previous/Next/Exit controls appear when you move the pointer or focus them, then fade while idle. The left/right arrow keys and the same swipe gestures after starting a session also navigate pages. Press Escape or click **Exit fullscreen** to return to the workspace, or click **Back to sample deck** to return to the built-in example. Password-protected PDFs are not supported in this version. GestureDeck does not upload or store the PDF.
 
 ## Current prototype boundary
 
