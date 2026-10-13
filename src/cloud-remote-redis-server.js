@@ -9,7 +9,7 @@ const FUNCTION_ROUTE_QUERY = '__gd_route';
 const SESSION_TTL_SECONDS = 4 * 60 * 60;
 const INVITE_TTL_MS = 120_000;
 const LEASE_TTL_SECONDS = 20;
-const POLL_INTERVAL_MS = 125;
+const POLL_INTERVAL_MS = 5_000;
 const MAX_BODY_BYTES = 16 * 1024;
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{16}$/;
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -62,6 +62,11 @@ local session = cjson.decode(raw)
 if not session.active or session.phoneCredential ~= ARGV[1] then return 'invalid' end
 if ARGV[2] == 'goTo' and tonumber(ARGV[3]) >= session.state.total then return 'out-of-range' end
 if redis.call('SET', KEYS[2], 'pending', 'NX', 'EX', ARGV[4]) == false then return 'duplicate' end
+if ARGV[6] == '1' then
+  local eventId = redis.call('XADD', KEYS[3], 'MAXLEN', '~', 2000, '*', 'data', ARGV[5])
+  redis.call('EXPIRE', KEYS[3], ARGV[4])
+  redis.call('PUBLISH', KEYS[4], cjson.encode({eventId = eventId, message = cjson.decode(ARGV[5])}))
+end
 return 'ok'
 `;
 
@@ -98,6 +103,7 @@ return {'ok', cjson.encode(session), cjson.encode(events or {}), inviteExpired}
 const PUBLISH_EVENT_SCRIPT = `
 local id = redis.call('XADD', KEYS[1], 'MAXLEN', '~', 2000, '*', 'data', ARGV[1])
 redis.call('EXPIRE', KEYS[1], ARGV[2])
+redis.call('PUBLISH', KEYS[2], cjson.encode({eventId = id, message = cjson.decode(ARGV[1])}))
 return id
 `;
 
@@ -204,10 +210,11 @@ function stateFromScriptResult(value) {
 }
 
 function key(id, suffix = '') { return `gesturedeck:${id}${suffix ? `:${suffix}` : ''}`; }
+function channelKey(id, role) { return key(id, `${role}-events`); }
 function token(bytes = 24) { return randomBytes(bytes).toString('base64url'); }
 
-async function publish(redis, streamKey, message) {
-  await redis.eval(PUBLISH_EVENT_SCRIPT, [streamKey], [JSON.stringify(message), String(SESSION_TTL_SECONDS)]);
+async function publish(redis, streamKey, eventChannel, message) {
+  await redis.eval(PUBLISH_EVENT_SCRIPT, [streamKey, eventChannel], [JSON.stringify(message), String(SESSION_TTL_SECONDS)]);
 }
 
 function eventsFromStreamResult(streams, cursor) {
@@ -222,15 +229,49 @@ function eventsFromStreamResult(streams, cursor) {
     const raw = Array.isArray(fields)
       ? fields[fields.indexOf('data') + 1]
       : fields?.data;
-    if (isRecord(raw)) events.push(raw);
+    if (isRecord(raw)) events.push({ id: nextCursor, message: raw });
     else if (typeof raw === 'string') {
       try {
         const event = JSON.parse(raw);
-        if (isRecord(event)) events.push(event);
+        if (isRecord(event)) events.push({ id: nextCursor, message: event });
       } catch { /* Ignore malformed transient events. */ }
     }
   }
   return { cursor: nextCursor, events };
+}
+
+async function subscribeEvents(redis, channel, onMessage) {
+  const subscriber = redis.subscribe(channel);
+  let ready = false;
+  let resolveReady;
+  let rejectReady;
+  const readyPromise = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
+  const timeout = setTimeout(() => rejectReady(new Error('Redis subscription timed out')), 8_000);
+  subscriber.on('subscribe', () => {
+    if (ready) return;
+    ready = true;
+    clearTimeout(timeout);
+    resolveReady();
+  });
+  subscriber.on('message', ({ message }) => onMessage(message));
+  subscriber.on('error', (error) => {
+    if (!ready) {
+      clearTimeout(timeout);
+      rejectReady(error);
+    }
+  });
+  try { await readyPromise; }
+  catch (error) { await subscriber.unsubscribe([channel]).catch(() => {}); throw error; }
+  return () => { void subscriber.unsubscribe([channel]).catch(() => {}); };
+}
+
+function readEventEnvelope(value) {
+  let parsed = value;
+  if (typeof parsed === 'string') {
+    try { parsed = JSON.parse(parsed); } catch { return null; }
+  }
+  if (!isRecord(parsed) || typeof parsed.eventId !== 'string' || !isRecord(parsed.message)) return null;
+  return { id: parsed.eventId, message: parsed.message };
 }
 
 async function pollSession(redis, { sessionKey, leaseKey, streamKey, connectionId, cursor, notifyInviteExpired = false }) {
@@ -316,7 +357,7 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
   async function deliver(id, role, streamKey, message) {
     const peer = localSessions.get(id)?.[role];
     if (peer?.send(message)) return;
-    await publish(redis, streamKey, message);
+    await publish(redis, streamKey, channelKey(id, role), message);
   }
 
   function normalizeFunctionRoute(request) {
@@ -394,12 +435,21 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
     let pollTimer;
     let authTimer;
     let closed = false;
+    let unsubscribeEvents;
+    const seenEvents = new Set();
+    const sendEvent = (eventId, message) => {
+      if (seenEvents.has(eventId)) return;
+      seenEvents.add(eventId);
+      if (seenEvents.size > 256) seenEvents.delete(seenEvents.values().next().value);
+      socket.send(message);
+    };
 
     const stop = async () => {
       if (closed) return;
       closed = true;
       clearTimeout(pollTimer);
       clearTimeout(authTimer);
+      unsubscribeEvents?.();
       sockets.delete(socket);
       if (authenticated) {
         clearLocalPeer(id, 'presenter', socket);
@@ -422,7 +472,7 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
         if (result.status !== 'ok') { socket.close(1008, 'Presenter session replaced'); return; }
         if (result.inviteExpired) socket.send({ type: 'inviteExpired' });
         cursor = result.cursor;
-        for (const message of result.events) socket.send(message);
+        for (const event of result.events) sendEvent(event.id, event.message);
       } catch {
         socket.close(1011, 'Relay storage unavailable');
         return;
@@ -446,6 +496,10 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
           authenticated = true;
           localPeers(id).presenter = socket;
           clearTimeout(authTimer);
+          unsubscribeEvents = await subscribeEvents(redis, channelKey(id, 'presenter'), (value) => {
+            const event = readEventEnvelope(value);
+            if (event) sendEvent(event.id, event.message);
+          });
           socket.send({ type: 'presenterReady' });
           await deliver(id, 'phone', key(id, 'to-phone'), { type: 'state', ...initialState });
           void poll();
@@ -478,12 +532,21 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
     let pollTimer;
     let authTimer;
     let closed = false;
+    let unsubscribeEvents;
+    const seenEvents = new Set();
+    const sendEvent = (eventId, message) => {
+      if (seenEvents.has(eventId)) return;
+      seenEvents.add(eventId);
+      if (seenEvents.size > 256) seenEvents.delete(seenEvents.values().next().value);
+      socket.send(message);
+    };
 
     const stop = async () => {
       if (closed) return;
       closed = true;
       clearTimeout(pollTimer);
       clearTimeout(authTimer);
+      unsubscribeEvents?.();
       sockets.delete(socket);
       if (admitted) {
         clearLocalPeer(id, 'phone', socket);
@@ -504,7 +567,7 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
         }
         if (result.status !== 'ok') { socket.close(1008, 'Phone session replaced'); return; }
         cursor = result.cursor;
-        for (const message of result.events) socket.send(message);
+        for (const event of result.events) sendEvent(event.id, event.message);
       } catch {
         socket.close(1011, 'Relay storage unavailable');
         return;
@@ -531,6 +594,10 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
             clearTimeout(authTimer);
             cursor = await latestEventId(redis, phoneEvents);
             const latestSession = await redis.get(sessionKey);
+            unsubscribeEvents = await subscribeEvents(redis, channelKey(id, 'phone'), (value) => {
+              const event = readEventEnvelope(value);
+              if (event) sendEvent(event.id, event.message);
+            });
             socket.send({ type: 'paired', credential, state });
             if (latestSession?.state) socket.send({ type: 'state', ...latestSession.state });
             await deliver(id, 'presenter', presenterEvents, { type: 'phonePaired' });
@@ -550,6 +617,10 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
             localPeers(id).phone = socket;
             clearTimeout(authTimer);
             cursor = await latestEventId(redis, phoneEvents);
+            unsubscribeEvents = await subscribeEvents(redis, channelKey(id, 'phone'), (value) => {
+              const event = readEventEnvelope(value);
+              if (event) sendEvent(event.id, event.message);
+            });
             socket.send({ type: 'resumed', state });
             void poll();
             return;
@@ -568,17 +639,22 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
               && Number.isSafeInteger(message.index) && message.index >= 0;
           if (!valid) return;
           const dedupeKey = key(id, `command:${message.id}`);
-          const result = await redis.eval(PHONE_COMMAND_SCRIPT, [sessionKey, dedupeKey], [
+          const localPresenter = localSessions.get(id)?.presenter;
+          const result = await redis.eval(PHONE_COMMAND_SCRIPT, [sessionKey, dedupeKey, presenterEvents, channelKey(id, 'presenter')], [
             credential,
             message.action,
             String(message.index ?? ''),
             String(SESSION_TTL_SECONDS),
+            JSON.stringify(message),
+            localPresenter ? '0' : '1',
           ]);
           if (result !== 'ok') {
             socket.send({ type: 'commandAck', id: message.id, accepted: false });
             return;
           }
-          await deliver(id, 'presenter', presenterEvents, message);
+          if (localPresenter && !localPresenter.send(message)) {
+            await publish(redis, presenterEvents, channelKey(id, 'presenter'), message);
+          }
         } else if (message.type === 'disconnect') {
           await endSession(redis, id, sessionKey, credential);
         }
