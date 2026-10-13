@@ -50,7 +50,8 @@ The multi-device change extends this flow. It does not move the presentation or 
 2. The phone can optionally enter a short nickname. GestureDeck attempts only lightweight browser-based identification of a coarse type such as iPhone or Android phone. It does not add a user-agent parsing library or retain a raw device fingerprint.
 3. The presenter list uses the nickname when present and otherwise a generated label such as **iPhone 1** or **Phone 1**. If a nickname is present, the detected type may be shown as secondary text.
 4. Every paired phone shows the same current slide position and has the existing Previous, Next, and numbered slide controls.
-5. A phone's **Disconnect** revokes only that phone's credential and frees one slot. A temporary network loss preserves the phone's session record so it can reconnect with the same label.
+5. After pairing, the phone shows **Connected as [label]** using the exact label in the presenter's list. The phone keeps showing the same label after reconnect.
+6. A phone's **Disconnect** revokes only that phone's credential and frees one slot. A temporary network loss preserves the phone's session record so it can reconnect with the same label.
 
 ## Architecture and data flow
 
@@ -59,14 +60,14 @@ The multi-device change extends this flow. It does not move the presentation or 
 - **Presenter browser:** Remains authoritative for the active deck, slide index, and PDF rendering state. It applies accepted phone commands through the existing presentation controller and publishes sanitized state.
 - **Remote session coordinator:** Changes from a single phone socket and credential to a map of up to eight phone records. Each record holds one phone credential, WebSocket when connected, label metadata, and connection state. The coordinator owns reusable invite expiry, session capacity, per-phone removal, command validation, and cleanup.
 - **Temporary LAN listener:** Remains one listener bound to the selected private network interface. It serves the existing isolated phone page and phone control WebSocket only while the presenter session is active.
-- **Phone browser page:** Sends its optional nickname and coarse device type while pairing, then sends allowlisted navigation commands. It renders only sanitized slide state and its own connection status.
+- **Phone browser page:** Sends its optional nickname and coarse device type while pairing, then sends allowlisted navigation commands. It renders only sanitized slide state, its own connection status, and the exact assigned label returned by the session coordinator.
 - **Presenter pairing dialog:** Keeps the QR/link available until invite expiry or renewal, shows the paired-phone list, provides per-phone removal, and retains a session-wide disconnect action.
 
 ### Pairing and synchronization
 
 The invite remains valid for five minutes and can be redeemed repeatedly, up to the eight-phone session limit. Pairing a phone does not consume the invite. Invite expiry prevents new joins but does not disconnect paired phones. The presenter may renew the invite during an active session; this replaces only the invite.
 
-Each phone receives an independent random credential. Reconnecting with that credential restores the existing record and current slide state rather than creating another slot. A temporary socket loss marks the device as reconnecting and continues to count against the eight-record limit until it resumes or the presenter removes it.
+Each phone receives an independent random credential and its assigned display label. Reconnecting with that credential restores the existing record, label, and current slide state rather than creating another slot. A temporary socket loss marks the device as reconnecting and continues to count against the eight-record limit until it resumes or the presenter removes it.
 
 The presenter publishes `{ index, total, busy }` to every open phone connection. A phone command is authenticated against that phone's record, validated, and forwarded to the presenter browser. Command identifiers are deduplicated within the originating phone record so separate phones cannot collide. An acknowledgement is returned only to the phone that sent the command. The presenter then broadcasts the resulting slide state to all phones.
 
@@ -100,13 +101,14 @@ The server sends presenter list updates when a phone pairs, resumes, disconnects
 3. Pairing one phone leaves the invite available for other phones; expiry blocks new joins but leaves paired phones working.
 4. Every paired phone has equal Previous, Next, and numbered-slide control and receives the same presenter-authoritative position and busy state.
 5. The presenter sees each phone's generated label, optional nickname, coarse detected device type when available, and connected/reconnecting status.
-6. The presenter can remove one phone without affecting any other phone or the listener.
-7. A phone's Disconnect removes only its own record; disconnecting all from the presenter revokes every credential and closes the listener.
-8. Temporary loss disables commands, preserves the phone's record and label, and reconnects without replaying earlier taps.
-9. A ninth phone is rejected with a session-full message until a slot is freed.
-10. Commands from separate phones are independently authenticated and deduplicated; each command acknowledgement goes only to its originating phone.
-11. The phone receives no slide content, PDF data, camera frames, or hand landmarks.
-12. Replacing the current single-phone policy does not expose the presenter workspace or broaden the listener's route allowlist.
+6. Each phone sees **Connected as [label]** with the exact label shown in the presenter list, both after pairing and after reconnect.
+7. The presenter can remove one phone without affecting any other phone or the listener.
+8. A phone's Disconnect removes only its own record; disconnecting all from the presenter revokes every credential and closes the listener.
+9. Temporary loss disables commands, preserves the phone's record and label, and reconnects without replaying earlier taps.
+10. A ninth phone is rejected with a session-full message until a slot is freed.
+11. Commands from separate phones are independently authenticated and deduplicated; each command acknowledgement goes only to its originating phone.
+12. The phone receives no slide content, PDF data, camera frames, or hand landmarks.
+13. Replacing the current single-phone policy does not expose the presenter workspace or broaden the listener's route allowlist.
 
 ## Validation approach
 
@@ -115,6 +117,7 @@ The server sends presenter list updates when a phone pairs, resumes, disconnects
 - Verify slide state broadcasts to all connected phones, commands from each phone reach the presenter, identifiers are deduplicated per phone, and acknowledgements return only to the source phone.
 - Cover malformed, oversized, out-of-range, duplicate, and busy-state commands across multiple phone records.
 - Verify nickname bounds and sanitization, coarse device-type allowlisting, generic fallback labels, and that names are not persisted beyond the active session.
+- Verify the exact assigned label appears on its phone after pairing and after reconnect, including nickname and generated-label cases.
 - Retain route allowlist, trusted-origin, selected-interface, and presenter-loopback boundary checks.
 - Manually pair multiple phones on one trusted Wi-Fi network, reconnect after phone sleep or Wi-Fi interruption, remove devices individually, and reach the eight-phone limit.
 - Inspect network traffic to confirm phones receive only navigation state and that camera and presentation content stay on the presenter device.
@@ -131,5 +134,6 @@ The server sends presenter list updates when a phone pairs, resumes, disconnects
 - Invite expiry is explicitly separated from remote-session lifetime: expiry stops new pairings but does not affect already paired phones.
 - The eight-phone limit counts reconnecting records, and both presenter removal and phone-initiated disconnect free a slot.
 - Nickname and device-type metadata are limited to the active session; a generic generated label is always available.
+- The phone and presenter use the same assigned display label, including after reconnect.
 - The phone Disconnect action and presenter-wide stop have distinct, unambiguous effects.
 - The presenter remains the single source of truth, preserving the existing local PDF and camera data boundaries.
