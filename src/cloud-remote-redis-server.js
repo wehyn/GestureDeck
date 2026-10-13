@@ -148,6 +148,12 @@ function sanitizeState(value) {
   return { index: value.index, total: value.total, busy: value.busy };
 }
 
+function stateFromScriptResult(value) {
+  if (isRecord(value)) return sanitizeState(value);
+  if (typeof value !== 'string' || !value.startsWith('{')) return null;
+  try { return sanitizeState(JSON.parse(value)); } catch { return null; }
+}
+
 function key(id, suffix = '') { return `gesturedeck:${id}${suffix ? `:${suffix}` : ''}`; }
 function token(bytes = 24) { return randomBytes(bytes).toString('base64url'); }
 
@@ -171,8 +177,12 @@ async function readEvents(redis, streamKey, cursor) {
     const raw = Array.isArray(fields)
       ? fields[fields.indexOf('data') + 1]
       : fields?.data;
-    if (typeof raw === 'string') {
-      try { events.push(JSON.parse(raw)); } catch { /* Ignore malformed transient events. */ }
+    if (isRecord(raw)) events.push(raw);
+    else if (typeof raw === 'string') {
+      try {
+        const event = JSON.parse(raw);
+        if (isRecord(event)) events.push(event);
+      } catch { /* Ignore malformed transient events. */ }
     }
   }
   return { cursor: nextCursor, events };
@@ -283,7 +293,8 @@ export function attachRedisCloudRemote(server, { redis = makeRedis() } = {}) {
           if (Object.keys(message).sort().join(',') !== 'credential,type' || message.type !== 'presenter'
             || typeof message.credential !== 'string') { socket.close(1008, 'Invalid credential'); return; }
           const result = await redis.eval(PRESENTER_AUTH_SCRIPT, [sessionKey, leaseKey], [message.credential, connectionId, String(LEASE_TTL_SECONDS)]);
-          if (typeof result !== 'string' || result === 'missing' || result === 'ended' || result === 'invalid' || result === 'occupied') {
+          const initialState = stateFromScriptResult(result);
+          if (!initialState) {
             socket.send({ type: 'presenterRejected', reason: result === 'occupied' ? 'already-connected' : 'invalid-credential' });
             socket.close(1008, 'Invalid credential');
             return;
@@ -291,7 +302,7 @@ export function attachRedisCloudRemote(server, { redis = makeRedis() } = {}) {
           authenticated = true;
           clearTimeout(authTimer);
           socket.send({ type: 'presenterReady' });
-          await publish(redis, key(id, 'to-phone'), { type: 'state', ...JSON.parse(result) });
+          await publish(redis, key(id, 'to-phone'), { type: 'state', ...initialState });
           void poll();
           return;
         }
@@ -362,11 +373,11 @@ export function attachRedisCloudRemote(server, { redis = makeRedis() } = {}) {
             const raw = await redis.eval(PHONE_PAIR_SCRIPT,
               [sessionKey, key(id, 'presenter-lease'), leaseKey],
               [message.invite, credential, String(Date.now()), connectionId, String(SESSION_TTL_SECONDS), String(LEASE_TTL_SECONDS)]);
-            if (typeof raw !== 'string' || raw.startsWith('{') === false) {
+            const state = stateFromScriptResult(raw);
+            if (!state) {
               socket.send({ type: 'pairRejected', reason: raw === 'expired' ? 'expired' : raw === 'already-paired' ? 'already-paired' : raw === 'host-unavailable' ? 'host-unavailable' : 'invalid' });
               return;
             }
-            const state = JSON.parse(raw);
             admitted = true;
             clearTimeout(authTimer);
             cursor = await latestEventId(redis, phoneEvents);
@@ -380,7 +391,8 @@ export function attachRedisCloudRemote(server, { redis = makeRedis() } = {}) {
           if (message.type === 'resume' && Object.keys(message).sort().join(',') === 'credential,type' && typeof message.credential === 'string') {
             credential = message.credential;
             const raw = await redis.eval(PHONE_RESUME_SCRIPT, [sessionKey, leaseKey], [credential, connectionId, String(LEASE_TTL_SECONDS)]);
-            if (typeof raw !== 'string' || !raw.startsWith('{')) {
+            const state = stateFromScriptResult(raw);
+            if (!state) {
               socket.send({ type: 'resumeRejected', reason: 'invalid' });
               socket.close(1008, 'Invalid credential');
               return;
@@ -388,7 +400,7 @@ export function attachRedisCloudRemote(server, { redis = makeRedis() } = {}) {
             admitted = true;
             clearTimeout(authTimer);
             cursor = await latestEventId(redis, phoneEvents);
-            socket.send({ type: 'resumed', state: JSON.parse(raw) });
+            socket.send({ type: 'resumed', state });
             void poll();
             return;
           }
