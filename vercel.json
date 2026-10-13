@@ -2,6 +2,10 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
   "fluid": true,
+  "functions": {
+    "api/cloud-remote.js": { "regions": ["sin1"] },
+    "api/cloud-remote-ws.js": { "regions": ["sin1"] }
+  },
   "buildCommand": "npm run build:vercel",
   "outputDirectory": "dist",
   "rewrites": [
