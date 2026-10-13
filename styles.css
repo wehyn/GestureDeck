@@ -150,7 +150,7 @@ summary:focus-visible {
 }
 
 .main-content {
-  padding-top: clamp(34px, 5.5vw, 70px);
+  padding-top: clamp(8.5px, 1.375vw, 17.5px);
 }
 
 .welcome-row {
@@ -1848,7 +1848,7 @@ body[data-session-state="error"] .state-dot {
   }
 
   .main-content {
-    padding-top: 34px;
+    padding-top: 8.5px;
   }
 
   .welcome-row {
