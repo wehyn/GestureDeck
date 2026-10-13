@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { once } from 'node:events';
 import { createAppServer, resolveListenHost } from '../server.mjs';
 
-const scratch = process.env.TMPDIR ?? '/home/dei/.hermes/cache/scratch';
+const scratch = process.env.TMPDIR ?? tmpdir();
 
 test('development server accepts loopback or all-interface bind addresses', () => {
   assert.equal(resolveListenHost(undefined), '0.0.0.0');
