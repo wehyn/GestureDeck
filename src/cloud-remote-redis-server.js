@@ -55,6 +55,27 @@ redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
 return cjson.encode(session.state)
 `;
 
+const PHONE_COMMAND_SCRIPT = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 'invalid' end
+local session = cjson.decode(raw)
+if not session.active or session.phoneCredential ~= ARGV[1] then return 'invalid' end
+if ARGV[2] == 'goTo' and tonumber(ARGV[3]) >= session.state.total then return 'out-of-range' end
+if redis.call('SET', KEYS[2], 'pending', 'NX', 'EX', ARGV[4]) == false then return 'duplicate' end
+return 'ok'
+`;
+
+const UPDATE_STATE_SCRIPT = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 'missing' end
+local session = cjson.decode(raw)
+if not session.active then return 'ended' end
+session.state = cjson.decode(ARGV[1])
+local ttl = math.max(1, math.ceil((session.expiresAt - tonumber(ARGV[2])) / 1000))
+redis.call('SET', KEYS[1], cjson.encode(session), 'EX', ttl)
+return 'ok'
+`;
+
 const POLL_SESSION_SCRIPT = `
 local raw = redis.call('GET', KEYS[1])
 if not raw then return {'missing'} end
@@ -277,6 +298,26 @@ function attachCloudWebSocketServer(server, { path, verifyRequest, onConnection 
 
 export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketFunctionPath } = {}) {
   const sockets = new Set();
+  const localSessions = new Map();
+
+  function localPeers(id) {
+    let peers = localSessions.get(id);
+    if (!peers) { peers = { presenter: null, phone: null }; localSessions.set(id, peers); }
+    return peers;
+  }
+
+  function clearLocalPeer(id, role, socket) {
+    const peers = localSessions.get(id);
+    if (!peers || peers[role] !== socket) return;
+    peers[role] = null;
+    if (!peers.presenter && !peers.phone) localSessions.delete(id);
+  }
+
+  async function deliver(id, role, streamKey, message) {
+    const peer = localSessions.get(id)?.[role];
+    if (peer?.send(message)) return;
+    await publish(redis, streamKey, message);
+  }
 
   function normalizeFunctionRoute(request) {
     let target;
@@ -361,8 +402,9 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
       clearTimeout(authTimer);
       sockets.delete(socket);
       if (authenticated) {
+        clearLocalPeer(id, 'presenter', socket);
         await redis.eval(RELEASE_PRESENTER_SCRIPT, [sessionKey, leaseKey], [connectionId, String(SESSION_TTL_SECONDS)]).catch(() => {});
-        await publish(redis, key(id, 'to-phone'), { type: 'sessionEnded' }).catch(() => {});
+        await deliver(id, 'phone', key(id, 'to-phone'), { type: 'sessionEnded' }).catch(() => {});
       }
     };
     socket.once('close', () => { void stop(); });
@@ -402,22 +444,21 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
             return;
           }
           authenticated = true;
+          localPeers(id).presenter = socket;
           clearTimeout(authTimer);
           socket.send({ type: 'presenterReady' });
-          await publish(redis, key(id, 'to-phone'), { type: 'state', ...initialState });
+          await deliver(id, 'phone', key(id, 'to-phone'), { type: 'state', ...initialState });
           void poll();
           return;
         }
-        const current = await redis.get(sessionKey);
-        if (!current?.active) { socket.close(1008, 'Session ended'); return; }
         if (message.type === 'state') {
           const state = sanitizeState(message);
           if (!state) return;
-          current.state = state;
-          await redis.set(sessionKey, current, { ex: Math.max(1, Math.ceil((current.expiresAt - Date.now()) / 1000)) });
-          await publish(redis, key(id, 'to-phone'), { type: 'state', ...state });
+          const updated = await redis.eval(UPDATE_STATE_SCRIPT, [sessionKey], [JSON.stringify(state), String(Date.now())]);
+          if (updated !== 'ok') { socket.close(1008, 'Session ended'); return; }
+          await deliver(id, 'phone', key(id, 'to-phone'), { type: 'state', ...state });
         } else if (message.type === 'commandAck' && typeof message.id === 'string' && typeof message.accepted === 'boolean') {
-          await publish(redis, key(id, 'to-phone'), { type: 'commandAck', id: message.id, accepted: message.accepted });
+          await deliver(id, 'phone', key(id, 'to-phone'), { type: 'commandAck', id: message.id, accepted: message.accepted });
         }
       } catch { socket.close(1011, 'Relay storage unavailable'); }
     });
@@ -444,7 +485,10 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
       clearTimeout(pollTimer);
       clearTimeout(authTimer);
       sockets.delete(socket);
-      if (admitted) await redis.eval(RELEASE_PHONE_SCRIPT, [leaseKey], [connectionId]).catch(() => {});
+      if (admitted) {
+        clearLocalPeer(id, 'phone', socket);
+        await redis.eval(RELEASE_PHONE_SCRIPT, [leaseKey], [connectionId]).catch(() => {});
+      }
     };
     socket.once('close', () => { void stop(); });
     authTimer = setTimeout(() => { if (!admitted) socket.close(1008, 'Authentication timeout'); }, 10_000);
@@ -483,12 +527,13 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
               return;
             }
             admitted = true;
+            localPeers(id).phone = socket;
             clearTimeout(authTimer);
             cursor = await latestEventId(redis, phoneEvents);
             const latestSession = await redis.get(sessionKey);
             socket.send({ type: 'paired', credential, state });
             if (latestSession?.state) socket.send({ type: 'state', ...latestSession.state });
-            await publish(redis, presenterEvents, { type: 'phonePaired' });
+            await deliver(id, 'presenter', presenterEvents, { type: 'phonePaired' });
             void poll();
             return;
           }
@@ -502,6 +547,7 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
               return;
             }
             admitted = true;
+            localPeers(id).phone = socket;
             clearTimeout(authTimer);
             cursor = await latestEventId(redis, phoneEvents);
             socket.send({ type: 'resumed', state });
@@ -521,19 +567,18 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
             : message.action === 'goTo' && keys === 'action,id,index,type'
               && Number.isSafeInteger(message.index) && message.index >= 0;
           if (!valid) return;
-          const current = await redis.get(sessionKey);
-          if (!current?.active || current.phoneCredential !== credential) return;
-          if (message.action === 'goTo' && message.index >= current.state.total) {
-            socket.send({ type: 'commandAck', id: message.id, accepted: false });
-            return;
-          }
           const dedupeKey = key(id, `command:${message.id}`);
-          const first = await redis.set(dedupeKey, 'pending', { nx: true, ex: SESSION_TTL_SECONDS });
-          if (!first) {
+          const result = await redis.eval(PHONE_COMMAND_SCRIPT, [sessionKey, dedupeKey], [
+            credential,
+            message.action,
+            String(message.index ?? ''),
+            String(SESSION_TTL_SECONDS),
+          ]);
+          if (result !== 'ok') {
             socket.send({ type: 'commandAck', id: message.id, accepted: false });
             return;
           }
-          await publish(redis, presenterEvents, message);
+          await deliver(id, 'presenter', presenterEvents, message);
         } else if (message.type === 'disconnect') {
           await endSession(redis, id, sessionKey, credential);
         }
@@ -549,8 +594,8 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
     current.phoneCredential = null;
     await client.set(sessionKey, current, { ex: Math.max(1, Math.ceil((current.expiresAt - Date.now()) / 1000)) });
     await Promise.all([
-      publish(client, key(id, 'to-presenter'), { type: 'sessionEnded' }),
-      publish(client, key(id, 'to-phone'), { type: 'sessionEnded' }),
+      deliver(id, 'presenter', key(id, 'to-presenter'), { type: 'sessionEnded' }),
+      deliver(id, 'phone', key(id, 'to-phone'), { type: 'sessionEnded' }),
       client.del(key(id, 'presenter-lease'), key(id, 'phone-lease')),
     ]);
     return true;
