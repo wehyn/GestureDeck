@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .vercel/
+.env*
+!.env.example
 .DS_Store
 *.log
 .superpowers/

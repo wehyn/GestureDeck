@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
-import { attachCloudRemote } from '../src/cloud-remote-server.js';
+import { attachRedisCloudRemote } from '../src/cloud-remote-redis-server.js';
 
 const server = createServer();
-attachCloudRemote(server);
+attachRedisCloudRemote(server);
 
 export default server;

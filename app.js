@@ -911,6 +911,8 @@ async function startCloudMobileRemote() {
       ? 'Open GestureDeck using its secure HTTPS link to connect your phone.'
       : error.message === 'capacity-reached'
         ? 'Phone sessions are busy right now. Try again in a little while.'
+        : error.message === 'relay-storage-unavailable'
+          ? 'Phone control is not available right now.'
         : error.message;
     setPairingStatus(`Could not start the phone connection. ${reason}`);
   }

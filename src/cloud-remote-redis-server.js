@@ -1,0 +1,531 @@
+import { randomBytes } from 'node:crypto';
+import { Redis } from '@upstash/redis';
+import { createQrDataUrl } from './qr-code.js';
+import { attachWebSocketServer } from './websocket.js';
+
+const API = '/api/cloud-remote/';
+const FUNCTION_ROUTE_QUERY = '__gd_route';
+const SESSION_TTL_SECONDS = 4 * 60 * 60;
+const INVITE_TTL_MS = 120_000;
+const LEASE_TTL_SECONDS = 20;
+const POLL_INTERVAL_MS = 250;
+const MAX_BODY_BYTES = 16 * 1024;
+const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{16}$/;
+const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const PRESENTER_AUTH_SCRIPT = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 'missing' end
+local session = cjson.decode(raw)
+if not session.active then return 'ended' end
+if session.hostCredential ~= ARGV[1] then return 'invalid' end
+if redis.call('SET', KEYS[2], ARGV[2], 'NX', 'EX', ARGV[3]) == false then return 'occupied' end
+return cjson.encode(session.state)
+`;
+
+const PHONE_PAIR_SCRIPT = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 'missing' end
+local session = cjson.decode(raw)
+if not session.active then return 'ended' end
+if redis.call('EXISTS', KEYS[2]) == 0 then return 'host-unavailable' end
+if session.phoneCredential then return 'already-paired' end
+if tonumber(session.inviteExpiresAt or 0) < tonumber(ARGV[3]) then return 'expired' end
+if session.invite ~= ARGV[1] then
+  session.pairAttempts = (session.pairAttempts or 0) + 1
+  if session.pairAttempts >= 5 then session.invite = '' end
+  redis.call('SET', KEYS[1], cjson.encode(session), 'EX', ARGV[5])
+  return 'invalid'
+end
+session.phoneCredential = ARGV[2]
+session.invite = ''
+session.inviteExpiresAt = 0
+redis.call('SET', KEYS[1], cjson.encode(session), 'EX', ARGV[5])
+redis.call('SET', KEYS[3], ARGV[4], 'EX', ARGV[6])
+return cjson.encode(session.state)
+`;
+
+const PHONE_RESUME_SCRIPT = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 'missing' end
+local session = cjson.decode(raw)
+if not session.active or session.phoneCredential ~= ARGV[1] then return 'invalid' end
+redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
+return cjson.encode(session.state)
+`;
+
+const EXTEND_LEASE_SCRIPT = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  redis.call('EXPIRE', KEYS[1], ARGV[2])
+  return 1
+end
+return 0
+`;
+
+const RELEASE_PRESENTER_SCRIPT = `
+if redis.call('GET', KEYS[2]) ~= ARGV[1] then return 0 end
+redis.call('DEL', KEYS[2])
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 1 end
+local session = cjson.decode(raw)
+session.active = false
+redis.call('SET', KEYS[1], cjson.encode(session), 'EX', ARGV[2])
+return 1
+`;
+
+const RELEASE_PHONE_SCRIPT = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
+return 0
+`;
+
+function makeRedis(env = process.env) {
+  const url = env.UPSTASH_REDIS_REST_URL ?? env.KV_REST_API_URL;
+  const token = env.UPSTASH_REDIS_REST_TOKEN ?? env.KV_REST_API_TOKEN;
+  if (!url || !token) return null;
+  return new Redis({ url, token });
+}
+
+function sendJson(response, status, value) {
+  response.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+  });
+  response.end(JSON.stringify(value));
+}
+
+function readJson(request) {
+  return new Promise((resolve, reject) => {
+    if (!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(request.headers['content-type'] ?? '')) {
+      reject(new Error('Expected JSON'));
+      request.resume();
+      return;
+    }
+    let size = 0;
+    let oversized = false;
+    const chunks = [];
+    request.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) { oversized = true; chunks.length = 0; }
+      else if (!oversized) chunks.push(chunk);
+    });
+    request.on('end', () => {
+      if (oversized) { reject(new Error('Body too large')); return; }
+      try {
+        const value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        if (!isRecord(value)) throw new Error('Expected object');
+        resolve(value);
+      } catch (error) { reject(error); }
+    });
+    request.on('error', reject);
+  });
+}
+
+function sameOrigin(request) {
+  if (typeof request.headers.host !== 'string' || typeof request.headers.origin !== 'string') return false;
+  try {
+    const origin = new URL(request.headers.origin);
+    return (origin.protocol === 'https:' || origin.protocol === 'http:')
+      && origin.host.toLowerCase() === request.headers.host.toLowerCase()
+      && origin.username === '' && origin.password === ''
+      && origin.pathname === '/' && origin.search === '' && origin.hash === '';
+  } catch { return false; }
+}
+
+function sessionIdFromTarget(target, route) {
+  try {
+    const parsed = new URL(target, 'http://gesturedeck.invalid');
+    if (parsed.pathname !== route || [...parsed.searchParams.keys()].some((key) => key !== 'session')) return null;
+    if (parsed.searchParams.getAll('session').length !== 1) return null;
+    const id = parsed.searchParams.get('session');
+    return SESSION_ID_PATTERN.test(id ?? '') ? id : null;
+  } catch { return null; }
+}
+
+function sanitizeState(value) {
+  if (!isRecord(value) || !Number.isSafeInteger(value.index) || !Number.isSafeInteger(value.total)
+    || value.total < 1 || value.index < 0 || value.index >= value.total || typeof value.busy !== 'boolean') return null;
+  return { index: value.index, total: value.total, busy: value.busy };
+}
+
+function key(id, suffix = '') { return `gesturedeck:${id}${suffix ? `:${suffix}` : ''}`; }
+function token(bytes = 24) { return randomBytes(bytes).toString('base64url'); }
+
+async function publish(redis, streamKey, message) {
+  await redis.xadd(streamKey, '*', { data: JSON.stringify(message) }, {
+    trim: { type: 'MAXLEN', threshold: 2000, comparison: '~' },
+  });
+  await redis.expire(streamKey, SESSION_TTL_SECONDS);
+}
+
+async function readEvents(redis, streamKey, cursor) {
+  const streams = await redis.xread(streamKey, cursor, { count: 100 });
+  if (!Array.isArray(streams) || streams.length === 0) return { cursor, events: [] };
+  const items = Array.isArray(streams[0]) ? streams[0][1] : [];
+  let nextCursor = cursor;
+  const events = [];
+  for (const item of items ?? []) {
+    if (!Array.isArray(item) || item.length < 2) continue;
+    nextCursor = String(item[0]);
+    const fields = item[1];
+    const raw = Array.isArray(fields)
+      ? fields[fields.indexOf('data') + 1]
+      : fields?.data;
+    if (typeof raw === 'string') {
+      try { events.push(JSON.parse(raw)); } catch { /* Ignore malformed transient events. */ }
+    }
+  }
+  return { cursor: nextCursor, events };
+}
+
+async function latestEventId(redis, streamKey) {
+  const entries = await redis.xrevrange(streamKey, '+', '-', 1);
+  if (Array.isArray(entries) && Array.isArray(entries[0])) return String(entries[0][0]);
+  if (entries && typeof entries === 'object') return Object.keys(entries)[0] ?? '0-0';
+  return '0-0';
+}
+
+export function attachRedisCloudRemote(server, { redis = makeRedis() } = {}) {
+  const sockets = new Set();
+
+  function normalizeFunctionRoute(request) {
+    let target;
+    try { target = new URL(request.url ?? '/', 'http://gesturedeck.invalid'); } catch { return; }
+    const route = target.searchParams.get(FUNCTION_ROUTE_QUERY);
+    if (!route) return;
+    target.searchParams.delete(FUNCTION_ROUTE_QUERY);
+    const path = {
+      start: `${API}start`,
+      'renew-invite': `${API}renew-invite`,
+      stop: `${API}stop`,
+      presenter: '/ws/cloud-remote/presenter',
+      phone: '/ws/cloud-remote/phone',
+    }[route];
+    if (path) request.url = `${path}${target.search}`;
+  }
+
+  server.prependListener('upgrade', normalizeFunctionRoute);
+  const wsOptions = {
+    maxPayloadBytes: MAX_BODY_BYTES,
+    verifyRequest(request, route) {
+      return Boolean(redis && sameOrigin(request) && sessionIdFromTarget(request.url ?? '', route));
+    },
+  };
+
+  const detachPresenter = attachWebSocketServer(server, {
+    ...wsOptions,
+    path: '/ws/cloud-remote/presenter',
+    verifyRequest: (request) => wsOptions.verifyRequest(request, '/ws/cloud-remote/presenter'),
+    onConnection(socket, request) { sockets.add(socket); void handlePresenter(socket, request); },
+  });
+
+  const detachPhone = attachWebSocketServer(server, {
+    ...wsOptions,
+    path: '/ws/cloud-remote/phone',
+    verifyRequest: (request) => wsOptions.verifyRequest(request, '/ws/cloud-remote/phone'),
+    onConnection(socket, request) { sockets.add(socket); void handlePhone(socket, request); },
+  });
+
+  async function handlePresenter(socket, request) {
+    const id = sessionIdFromTarget(request.url ?? '', '/ws/cloud-remote/presenter');
+    if (!id) { socket.close(1008, 'Invalid session'); return; }
+    const sessionKey = key(id);
+    const leaseKey = key(id, 'presenter-lease');
+    const phoneEvents = key(id, 'to-presenter');
+    const connectionId = token(12);
+    let authenticated = false;
+    let cursor = '0-0';
+    let pollTimer;
+    let authTimer;
+    let closed = false;
+
+    const stop = async () => {
+      if (closed) return;
+      closed = true;
+      clearTimeout(pollTimer);
+      clearTimeout(authTimer);
+      sockets.delete(socket);
+      if (authenticated) {
+        await redis.eval(RELEASE_PRESENTER_SCRIPT, [sessionKey, leaseKey], [connectionId, String(SESSION_TTL_SECONDS)]).catch(() => {});
+        await publish(redis, key(id, 'to-phone'), { type: 'sessionEnded' }).catch(() => {});
+      }
+    };
+    socket.once('close', () => { void stop(); });
+    authTimer = setTimeout(() => { if (!authenticated) socket.close(1008, 'Authentication timeout'); }, 10_000);
+
+    async function poll() {
+      if (closed || !authenticated) return;
+      try {
+        const latest = await redis.get(sessionKey);
+        if (!latest?.active) { socket.send({ type: 'sessionEnded' }); socket.close(1000, 'Session ended'); return; }
+        const lease = await redis.eval(EXTEND_LEASE_SCRIPT, [leaseKey], [connectionId, String(LEASE_TTL_SECONDS)]);
+        if (!Number(lease)) { socket.close(1008, 'Presenter session replaced'); return; }
+        if (!latest.phoneCredential && latest.inviteExpiresAt > 0
+          && Date.now() >= latest.inviteExpiresAt && !latest.inviteExpiredNotified) {
+          latest.inviteExpiredNotified = true;
+          await redis.set(sessionKey, latest, { ex: Math.max(1, Math.ceil((latest.expiresAt - Date.now()) / 1000)) });
+          socket.send({ type: 'inviteExpired' });
+        }
+        const batch = await readEvents(redis, phoneEvents, cursor);
+        cursor = batch.cursor;
+        for (const message of batch.events) socket.send(message);
+      } catch {
+        socket.close(1011, 'Relay storage unavailable');
+        return;
+      }
+      pollTimer = setTimeout(poll, POLL_INTERVAL_MS);
+    }
+
+    socket.on('message', async (message) => {
+      if (closed || !isRecord(message)) return;
+      try {
+        if (!authenticated) {
+          if (Object.keys(message).sort().join(',') !== 'credential,type' || message.type !== 'presenter'
+            || typeof message.credential !== 'string') { socket.close(1008, 'Invalid credential'); return; }
+          const result = await redis.eval(PRESENTER_AUTH_SCRIPT, [sessionKey, leaseKey], [message.credential, connectionId, String(LEASE_TTL_SECONDS)]);
+          if (typeof result !== 'string' || result === 'missing' || result === 'ended' || result === 'invalid' || result === 'occupied') {
+            socket.send({ type: 'presenterRejected', reason: result === 'occupied' ? 'already-connected' : 'invalid-credential' });
+            socket.close(1008, 'Invalid credential');
+            return;
+          }
+          authenticated = true;
+          clearTimeout(authTimer);
+          socket.send({ type: 'presenterReady' });
+          await publish(redis, key(id, 'to-phone'), { type: 'state', ...JSON.parse(result) });
+          void poll();
+          return;
+        }
+        const current = await redis.get(sessionKey);
+        if (!current?.active) { socket.close(1008, 'Session ended'); return; }
+        if (message.type === 'state') {
+          const state = sanitizeState(message);
+          if (!state) return;
+          current.state = state;
+          await redis.set(sessionKey, current, { ex: Math.max(1, Math.ceil((current.expiresAt - Date.now()) / 1000)) });
+          await publish(redis, key(id, 'to-phone'), { type: 'state', ...state });
+        } else if (message.type === 'commandAck' && typeof message.id === 'string' && typeof message.accepted === 'boolean') {
+          await publish(redis, key(id, 'to-phone'), { type: 'commandAck', id: message.id, accepted: message.accepted });
+        }
+      } catch { socket.close(1011, 'Relay storage unavailable'); }
+    });
+  }
+
+  async function handlePhone(socket, request) {
+    const id = sessionIdFromTarget(request.url ?? '', '/ws/cloud-remote/phone');
+    if (!id) { socket.close(1008, 'Invalid session'); return; }
+    const sessionKey = key(id);
+    const leaseKey = key(id, 'phone-lease');
+    const presenterEvents = key(id, 'to-presenter');
+    const phoneEvents = key(id, 'to-phone');
+    const connectionId = token(12);
+    let admitted = false;
+    let credential = '';
+    let cursor = '0-0';
+    let pollTimer;
+    let authTimer;
+    let closed = false;
+
+    const stop = async () => {
+      if (closed) return;
+      closed = true;
+      clearTimeout(pollTimer);
+      clearTimeout(authTimer);
+      sockets.delete(socket);
+      if (admitted) await redis.eval(RELEASE_PHONE_SCRIPT, [leaseKey], [connectionId]).catch(() => {});
+    };
+    socket.once('close', () => { void stop(); });
+    authTimer = setTimeout(() => { if (!admitted) socket.close(1008, 'Authentication timeout'); }, 10_000);
+
+    async function poll() {
+      if (closed || !admitted) return;
+      try {
+        const latest = await redis.get(sessionKey);
+        if (!latest?.active) { socket.send({ type: 'sessionEnded' }); socket.close(1000, 'Session ended'); return; }
+        const lease = await redis.eval(EXTEND_LEASE_SCRIPT, [leaseKey], [connectionId, String(LEASE_TTL_SECONDS)]);
+        if (!Number(lease)) { socket.close(1008, 'Phone session replaced'); return; }
+        const batch = await readEvents(redis, phoneEvents, cursor);
+        cursor = batch.cursor;
+        for (const message of batch.events) socket.send(message);
+      } catch {
+        socket.close(1011, 'Relay storage unavailable');
+        return;
+      }
+      pollTimer = setTimeout(poll, POLL_INTERVAL_MS);
+    }
+
+    socket.on('message', async (message) => {
+      if (closed || !isRecord(message)) return;
+      try {
+        if (!admitted) {
+          if (message.type === 'pair' && Object.keys(message).sort().join(',') === 'invite,type' && typeof message.invite === 'string') {
+            credential = token();
+            const raw = await redis.eval(PHONE_PAIR_SCRIPT,
+              [sessionKey, key(id, 'presenter-lease'), leaseKey],
+              [message.invite, credential, String(Date.now()), connectionId, String(SESSION_TTL_SECONDS), String(LEASE_TTL_SECONDS)]);
+            if (typeof raw !== 'string' || raw.startsWith('{') === false) {
+              socket.send({ type: 'pairRejected', reason: raw === 'expired' ? 'expired' : raw === 'already-paired' ? 'already-paired' : raw === 'host-unavailable' ? 'host-unavailable' : 'invalid' });
+              return;
+            }
+            const state = JSON.parse(raw);
+            admitted = true;
+            clearTimeout(authTimer);
+            cursor = await latestEventId(redis, phoneEvents);
+            const latestSession = await redis.get(sessionKey);
+            socket.send({ type: 'paired', credential, state });
+            if (latestSession?.state) socket.send({ type: 'state', ...latestSession.state });
+            await publish(redis, presenterEvents, { type: 'phonePaired' });
+            void poll();
+            return;
+          }
+          if (message.type === 'resume' && Object.keys(message).sort().join(',') === 'credential,type' && typeof message.credential === 'string') {
+            credential = message.credential;
+            const raw = await redis.eval(PHONE_RESUME_SCRIPT, [sessionKey, leaseKey], [credential, connectionId, String(LEASE_TTL_SECONDS)]);
+            if (typeof raw !== 'string' || !raw.startsWith('{')) {
+              socket.send({ type: 'resumeRejected', reason: 'invalid' });
+              socket.close(1008, 'Invalid credential');
+              return;
+            }
+            admitted = true;
+            clearTimeout(authTimer);
+            cursor = await latestEventId(redis, phoneEvents);
+            socket.send({ type: 'resumed', state: JSON.parse(raw) });
+            void poll();
+            return;
+          }
+          socket.close(1008, 'Pairing required');
+          return;
+        }
+
+        if (message.type === 'command') {
+          if (typeof message.id !== 'string' || message.id.length < 1 || message.id.length > 128
+            || /[\s\u0000-\u001f\u007f]/.test(message.id)) return;
+          const keys = Object.keys(message).sort().join(',');
+          const valid = (message.action === 'previous' || message.action === 'next')
+            ? keys === 'action,id,type'
+            : message.action === 'goTo' && keys === 'action,id,index,type'
+              && Number.isSafeInteger(message.index) && message.index >= 0;
+          if (!valid) return;
+          const current = await redis.get(sessionKey);
+          if (!current?.active || current.phoneCredential !== credential) return;
+          if (message.action === 'goTo' && message.index >= current.state.total) {
+            socket.send({ type: 'commandAck', id: message.id, accepted: false });
+            return;
+          }
+          const dedupeKey = key(id, `command:${message.id}`);
+          const first = await redis.set(dedupeKey, 'pending', { nx: true, ex: SESSION_TTL_SECONDS });
+          if (!first) {
+            socket.send({ type: 'commandAck', id: message.id, accepted: false });
+            return;
+          }
+          await publish(redis, presenterEvents, message);
+        } else if (message.type === 'disconnect') {
+          await endSession(redis, id, sessionKey, credential);
+        }
+      } catch { socket.close(1011, 'Relay storage unavailable'); }
+    });
+  }
+
+  async function endSession(client, id, sessionKey, credential) {
+    const current = await client.get(sessionKey);
+    if (!current?.active || (credential && current.phoneCredential !== credential)) return false;
+    current.active = false;
+    current.invite = '';
+    current.phoneCredential = null;
+    await client.set(sessionKey, current, { ex: Math.max(1, Math.ceil((current.expiresAt - Date.now()) / 1000)) });
+    await Promise.all([
+      publish(client, key(id, 'to-presenter'), { type: 'sessionEnded' }),
+      publish(client, key(id, 'to-phone'), { type: 'sessionEnded' }),
+      client.del(key(id, 'presenter-lease'), key(id, 'phone-lease')),
+    ]);
+    return true;
+  }
+
+  const previousListeners = server.listeners('request');
+  for (const listener of previousListeners) server.off('request', listener);
+  const requestListener = (request, response) => {
+    normalizeFunctionRoute(request);
+    if (!request.url?.startsWith(API)) {
+      for (const listener of previousListeners) listener.call(server, request, response);
+      return;
+    }
+    void (async () => {
+      if (!redis) { sendJson(response, 503, { error: 'relay-storage-unavailable' }); return; }
+      if (!sameOrigin(request)) { sendJson(response, 403, { error: 'forbidden' }); return; }
+      const route = request.url.slice(API.length);
+      if (!['start', 'renew-invite', 'stop'].includes(route) || request.method !== 'POST') {
+        sendJson(response, 404, { error: 'not-found' });
+        return;
+      }
+      let body;
+      try { body = await readJson(request); } catch {
+        if (!response.destroyed) sendJson(response, 400, { error: 'invalid-json' });
+        return;
+      }
+      if (route === 'start') {
+        if (Object.keys(body).join(',') !== 'state') { sendJson(response, 400, { error: 'invalid-request' }); return; }
+        const state = sanitizeState(body.state);
+        if (!state) { sendJson(response, 400, { error: 'invalid-state' }); return; }
+        const origin = new URL(request.headers.origin);
+        if (origin.protocol !== 'https:') { sendJson(response, 426, { error: 'https-required' }); return; }
+        const id = token(12);
+        const hostCredential = token();
+        const invite = token();
+        const expiresAt = Date.now() + SESSION_TTL_SECONDS * 1000;
+        const session = { active: true, origin: origin.origin, hostCredential, invite,
+          inviteExpiresAt: Date.now() + INVITE_TTL_MS, pairAttempts: 0,
+          phoneCredential: null, state, expiresAt };
+        await redis.set(key(id), session, { ex: SESSION_TTL_SECONDS, nx: true });
+        const pairingUrl = new URL(`/r/${id}`, origin.origin);
+        pairingUrl.hash = invite;
+        sendJson(response, 200, { sessionId: id, hostCredential, expiresAt,
+          fallbackUrl: pairingUrl.href, qrDataUrl: createQrDataUrl(pairingUrl.href) });
+        return;
+      }
+
+      if (Object.keys(body).sort().join(',') !== 'hostCredential,sessionId'
+        || typeof body.sessionId !== 'string' || !SESSION_ID_PATTERN.test(body.sessionId)
+        || typeof body.hostCredential !== 'string') {
+        sendJson(response, 400, { error: 'invalid-request' });
+        return;
+      }
+      const sessionKey = key(body.sessionId);
+      const current = await redis.get(sessionKey);
+      if (!current?.active || current.hostCredential !== body.hostCredential
+        || current.origin !== new URL(request.headers.origin).origin) {
+        sendJson(response, 404, { error: 'session-unavailable' });
+        return;
+      }
+      if (route === 'stop') {
+        await endSession(redis, body.sessionId, sessionKey, '');
+        sendJson(response, 200, { stopped: true });
+        return;
+      }
+      if (current.phoneCredential) { sendJson(response, 409, { error: 'session-not-pairable' }); return; }
+      current.invite = token();
+      current.inviteExpiresAt = Date.now() + INVITE_TTL_MS;
+      current.pairAttempts = 0;
+      current.inviteExpiredNotified = false;
+      await redis.set(sessionKey, current, { ex: Math.max(1, Math.ceil((current.expiresAt - Date.now()) / 1000)) });
+      const pairingUrl = new URL(`/r/${body.sessionId}`, current.origin);
+      pairingUrl.hash = current.invite;
+      sendJson(response, 200, { expiresAt: current.inviteExpiresAt,
+        fallbackUrl: pairingUrl.href, qrDataUrl: createQrDataUrl(pairingUrl.href) });
+    })().catch(() => {
+      if (!response.headersSent) sendJson(response, 503, { error: 'relay-storage-unavailable' });
+    });
+  };
+  server.on('request', requestListener);
+
+  return {
+    async close() {
+      for (const socket of sockets) {
+        try { socket.close(1001, 'Server shutting down'); } catch { socket.destroy?.(); }
+      }
+      detachPhone();
+      detachPresenter();
+      server.off('request', requestListener);
+      server.off('upgrade', normalizeFunctionRoute);
+      for (const listener of previousListeners) server.on('request', listener);
+    },
+  };
+}

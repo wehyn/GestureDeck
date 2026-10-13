@@ -8,10 +8,11 @@
     "dev": "node server.mjs",
     "build:vercel": "node scripts/build-vercel.mjs",
     "test": "node --test",
-    "check": "node --check server.mjs && node --check app.js && node --check src/mobile-remote-session.js && node --check src/mobile-remote-server.js && node --check src/mobile-remote-client.js && node --check src/mobile-remote-phone.js && node --check src/websocket.js && node --check src/qr-code.js && node --check src/presentation.js && node --check src/pdf-presentation.js && node --check src/camera-session.js && node --check src/camera-preview.js && node --check src/hand-overlay.js && node --check src/hand-tracking.js && node --check src/local-hand-tracker.js && node --check src/gesture-engine.js"
+    "check": "node --check server.mjs && node --check app.js && node --check src/mobile-remote-session.js && node --check src/mobile-remote-server.js && node --check src/cloud-remote-server.js && node --check src/cloud-remote-redis-server.js && node --check src/mobile-remote-client.js && node --check src/mobile-remote-phone.js && node --check src/websocket.js && node --check src/qr-code.js && node --check src/presentation.js && node --check src/pdf-presentation.js && node --check src/camera-session.js && node --check src/camera-preview.js && node --check src/hand-overlay.js && node --check src/hand-tracking.js && node --check src/local-hand-tracker.js && node --check src/gesture-engine.js"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "0.10.33",
+    "@upstash/redis": "^1.39.0",
     "pdfjs-dist": "4.10.38"
   }
 }
