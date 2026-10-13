@@ -631,6 +631,7 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
 
         if (message.type === 'command') {
           if (typeof message.id !== 'string' || message.id.length < 1 || message.id.length > 128
+            // eslint-disable-next-line no-control-regex -- Reject control characters in untrusted command IDs.
             || /[\s\u0000-\u001f\u007f]/.test(message.id)) return;
           const keys = Object.keys(message).sort().join(',');
           const valid = (message.action === 'previous' || message.action === 'next')

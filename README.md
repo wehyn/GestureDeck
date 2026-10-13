@@ -82,6 +82,7 @@ Requires Node.js 20+ and npm.
 npm install
 npm test
 npm run check
+npm run lint
 npm run dev
 ```
 

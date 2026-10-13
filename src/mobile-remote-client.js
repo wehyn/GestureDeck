@@ -21,6 +21,7 @@ function validCommand(message) {
   if (!isRecord(message) || message.type !== 'command'
     || typeof message.id !== 'string' || message.id.length < 1 || message.id.length > 128
     || message.id.trim() !== message.id
+    // eslint-disable-next-line no-control-regex -- Reject control characters in untrusted command IDs.
     || /[\s\u0000-\u001f\u007f]/.test(message.id)) return false;
   const keys = Object.keys(message).sort();
   if (message.action === 'previous' || message.action === 'next') {

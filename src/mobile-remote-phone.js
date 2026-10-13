@@ -26,6 +26,7 @@ function validPhoneIdentity(message) {
     && typeof message.label === 'string'
     && message.label.length > 0
     && message.label.length <= 64
+    // eslint-disable-next-line no-control-regex -- Labels arrive from the pairing server and must not contain controls.
     && !/[\u0000-\u001f\u007f-\u009f]/.test(message.label)
     && DEVICE_TYPES.has(message.deviceType);
 }
@@ -113,6 +114,7 @@ export function mountMobileRemotePhone({
   }
   if (typeof credential !== 'string' || credential.length === 0) credential = null;
   if (typeof rememberedLabel !== 'string' || rememberedLabel.length === 0 || rememberedLabel.length > 64
+    // eslint-disable-next-line no-control-regex -- Validate the remembered display label before rendering it.
     || /[\u0000-\u001f\u007f-\u009f]/.test(rememberedLabel)) rememberedLabel = null;
   let invite = readInvite(location.hash);
   let socket;
@@ -491,6 +493,7 @@ export function mountMobileRemotePhone({
 
   connectButton.addEventListener('click', () => {
     if (terminal || credential || !invite || pairingInProgress) return;
+    // eslint-disable-next-line no-control-regex -- Strip control characters before sending the optional nickname.
     pendingNickname = String(nicknameInput.value ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, '').replace(/\s+/g, ' ').trim();
     pairingInProgress = true;
     pairAfterOpen = true;

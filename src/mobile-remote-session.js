@@ -82,6 +82,7 @@ function isValidCommandId(id) {
     && id.length > 0
     && id.length <= MAX_COMMAND_ID_LENGTH
     && id.trim() === id
+    // eslint-disable-next-line no-control-regex -- Reject control characters in untrusted command IDs.
     && !/[\s\u0000-\u001f\u007f]/.test(id);
 }
 
@@ -102,10 +103,10 @@ function truncateLabel(value, length) {
 
 function sanitizePhoneMetadata(message) {
   const deviceType = DEVICE_TYPES.has(message.deviceType) ? message.deviceType : 'phone';
-  const nickname = typeof message.nickname === 'string'
-    ? [...message.nickname.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').replace(/\s+/g, ' ').trim()]
-      .slice(0, MAX_NICKNAME_LENGTH).join('')
-    : '';
+  const rawNickname = typeof message.nickname === 'string' ? message.nickname : '';
+  // eslint-disable-next-line no-control-regex -- Remove control characters from untrusted phone nicknames.
+  const nickname = [...rawNickname.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').replace(/\s+/g, ' ').trim()]
+    .slice(0, MAX_NICKNAME_LENGTH).join('');
   return { nickname, deviceType };
 }
 
