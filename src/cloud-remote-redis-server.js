@@ -9,7 +9,7 @@ const FUNCTION_ROUTE_QUERY = '__gd_route';
 const SESSION_TTL_SECONDS = 4 * 60 * 60;
 const INVITE_TTL_MS = 120_000;
 const LEASE_TTL_SECONDS = 20;
-const POLL_INTERVAL_MS = 250;
+const POLL_INTERVAL_MS = 125;
 const MAX_BODY_BYTES = 16 * 1024;
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{16}$/;
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -55,12 +55,29 @@ redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
 return cjson.encode(session.state)
 `;
 
-const EXTEND_LEASE_SCRIPT = `
-if redis.call('GET', KEYS[1]) == ARGV[1] then
-  redis.call('EXPIRE', KEYS[1], ARGV[2])
-  return 1
+const POLL_SESSION_SCRIPT = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return {'missing'} end
+local session = cjson.decode(raw)
+if not session.active then return {'ended'} end
+if redis.call('GET', KEYS[2]) ~= ARGV[1] then return {'replaced'} end
+redis.call('EXPIRE', KEYS[2], ARGV[2])
+local inviteExpired = '0'
+if ARGV[5] == '1' and not session.phoneCredential and session.inviteExpiresAt > 0
+  and tonumber(ARGV[3]) >= session.inviteExpiresAt and not session.inviteExpiredNotified then
+  session.inviteExpiredNotified = true
+  local ttl = math.max(1, math.ceil((session.expiresAt - tonumber(ARGV[3])) / 1000))
+  redis.call('SET', KEYS[1], cjson.encode(session), 'EX', ttl)
+  inviteExpired = '1'
 end
-return 0
+local events = redis.call('XREAD', 'COUNT', 100, 'STREAMS', KEYS[3], ARGV[4])
+return {'ok', cjson.encode(session), cjson.encode(events or {}), inviteExpired}
+`;
+
+const PUBLISH_EVENT_SCRIPT = `
+local id = redis.call('XADD', KEYS[1], 'MAXLEN', '~', 2000, '*', 'data', ARGV[1])
+redis.call('EXPIRE', KEYS[1], ARGV[2])
+return id
 `;
 
 const RELEASE_PRESENTER_SCRIPT = `
@@ -169,14 +186,10 @@ function key(id, suffix = '') { return `gesturedeck:${id}${suffix ? `:${suffix}`
 function token(bytes = 24) { return randomBytes(bytes).toString('base64url'); }
 
 async function publish(redis, streamKey, message) {
-  await redis.xadd(streamKey, '*', { data: JSON.stringify(message) }, {
-    trim: { type: 'MAXLEN', threshold: 2000, comparison: '~' },
-  });
-  await redis.expire(streamKey, SESSION_TTL_SECONDS);
+  await redis.eval(PUBLISH_EVENT_SCRIPT, [streamKey], [JSON.stringify(message), String(SESSION_TTL_SECONDS)]);
 }
 
-async function readEvents(redis, streamKey, cursor) {
-  const streams = await redis.xread(streamKey, cursor, { count: 100 });
+function eventsFromStreamResult(streams, cursor) {
   if (!Array.isArray(streams) || streams.length === 0) return { cursor, events: [] };
   const items = Array.isArray(streams[0]) ? streams[0][1] : [];
   let nextCursor = cursor;
@@ -197,6 +210,27 @@ async function readEvents(redis, streamKey, cursor) {
     }
   }
   return { cursor: nextCursor, events };
+}
+
+async function pollSession(redis, { sessionKey, leaseKey, streamKey, connectionId, cursor, notifyInviteExpired = false }) {
+  const result = await redis.eval(POLL_SESSION_SCRIPT, [sessionKey, leaseKey, streamKey], [
+    connectionId,
+    String(LEASE_TTL_SECONDS),
+    String(Date.now()),
+    cursor,
+    notifyInviteExpired ? '1' : '0',
+  ]);
+  if (!Array.isArray(result) || typeof result[0] !== 'string') throw new Error('Invalid poll result');
+  const [status, rawSession, rawEvents, inviteExpired] = result;
+  if (status !== 'ok') return { status };
+  const session = isRecord(rawSession) ? rawSession : JSON.parse(rawSession);
+  const streams = Array.isArray(rawEvents) ? rawEvents : JSON.parse(rawEvents);
+  return {
+    status,
+    session,
+    inviteExpired: inviteExpired === '1',
+    ...eventsFromStreamResult(streams, cursor),
+  };
 }
 
 async function latestEventId(redis, streamKey) {
@@ -337,19 +371,16 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
     async function poll() {
       if (closed || !authenticated) return;
       try {
-        const latest = await redis.get(sessionKey);
-        if (!latest?.active) { socket.send({ type: 'sessionEnded' }); socket.close(1000, 'Session ended'); return; }
-        const lease = await redis.eval(EXTEND_LEASE_SCRIPT, [leaseKey], [connectionId, String(LEASE_TTL_SECONDS)]);
-        if (!Number(lease)) { socket.close(1008, 'Presenter session replaced'); return; }
-        if (!latest.phoneCredential && latest.inviteExpiresAt > 0
-          && Date.now() >= latest.inviteExpiresAt && !latest.inviteExpiredNotified) {
-          latest.inviteExpiredNotified = true;
-          await redis.set(sessionKey, latest, { ex: Math.max(1, Math.ceil((latest.expiresAt - Date.now()) / 1000)) });
-          socket.send({ type: 'inviteExpired' });
+        const result = await pollSession(redis, {
+          sessionKey, leaseKey, streamKey: phoneEvents, connectionId, cursor, notifyInviteExpired: true,
+        });
+        if (result.status === 'missing' || result.status === 'ended') {
+          socket.send({ type: 'sessionEnded' }); socket.close(1000, 'Session ended'); return;
         }
-        const batch = await readEvents(redis, phoneEvents, cursor);
-        cursor = batch.cursor;
-        for (const message of batch.events) socket.send(message);
+        if (result.status !== 'ok') { socket.close(1008, 'Presenter session replaced'); return; }
+        if (result.inviteExpired) socket.send({ type: 'inviteExpired' });
+        cursor = result.cursor;
+        for (const message of result.events) socket.send(message);
       } catch {
         socket.close(1011, 'Relay storage unavailable');
         return;
@@ -421,13 +452,15 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
     async function poll() {
       if (closed || !admitted) return;
       try {
-        const latest = await redis.get(sessionKey);
-        if (!latest?.active) { socket.send({ type: 'sessionEnded' }); socket.close(1000, 'Session ended'); return; }
-        const lease = await redis.eval(EXTEND_LEASE_SCRIPT, [leaseKey], [connectionId, String(LEASE_TTL_SECONDS)]);
-        if (!Number(lease)) { socket.close(1008, 'Phone session replaced'); return; }
-        const batch = await readEvents(redis, phoneEvents, cursor);
-        cursor = batch.cursor;
-        for (const message of batch.events) socket.send(message);
+        const result = await pollSession(redis, {
+          sessionKey, leaseKey, streamKey: phoneEvents, connectionId, cursor,
+        });
+        if (result.status === 'missing' || result.status === 'ended') {
+          socket.send({ type: 'sessionEnded' }); socket.close(1000, 'Session ended'); return;
+        }
+        if (result.status !== 'ok') { socket.close(1008, 'Phone session replaced'); return; }
+        cursor = result.cursor;
+        for (const message of result.events) socket.send(message);
       } catch {
         socket.close(1011, 'Relay storage unavailable');
         return;
