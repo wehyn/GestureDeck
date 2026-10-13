@@ -308,7 +308,7 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
   }
 
   async function handlePresenter(socket, request) {
-    const id = sessionIdFromTarget(request.url ?? '', '/ws/cloud-remote/presenter');
+    const id = sessionIdFromTarget(request.url ?? '', '/ws/cloud-remote/presenter', webSocketFunctionPath);
     if (!id) { socket.close(1008, 'Invalid session'); return; }
     const sessionKey = key(id);
     const leaseKey = key(id, 'presenter-lease');
@@ -393,7 +393,7 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
   }
 
   async function handlePhone(socket, request) {
-    const id = sessionIdFromTarget(request.url ?? '', '/ws/cloud-remote/phone');
+    const id = sessionIdFromTarget(request.url ?? '', '/ws/cloud-remote/phone', webSocketFunctionPath);
     if (!id) { socket.close(1008, 'Invalid session'); return; }
     const sessionKey = key(id);
     const leaseKey = key(id, 'phone-lease');
