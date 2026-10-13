@@ -110,6 +110,8 @@ Open the hosted GestureDeck home page over HTTPS and choose **Start presenting**
 
 Cloud sessions are temporary and held in memory by one running Node.js process. They stop when the presenter ends the session, disconnects, or reaches the four-hour limit; a server restart ends all active sessions. V1 supports one phone per presenter session, no accounts, and no shared presenter roles or notes. The reverse proxy must preserve same-origin requests and forward WebSocket upgrades. Use HTTPS so phone connections use secure WebSockets.
 
+For Vercel, `npm run build:vercel` copies only browser assets to `dist/`; `vercel.json` sets that directory as the static output and routes cloud relay requests to the Node.js WebSocket function. Vercel may run more than one function instance, so process-local cloud sessions are suitable for an initial low-volume deployment only; use a shared store and message relay before relying on sessions across instances.
+
 ## Current prototype boundary
 
 The browser prototype controls its built-in sample slide deck or an imported PDF inside GestureDeck. A browser page cannot safely send keyboard events to a separate native Keynote process, so the macOS/Keynote target described in `spec.md` remains a platform-specific adapter to implement and test on macOS. The app must not imply that Keynote is connected when it is not.

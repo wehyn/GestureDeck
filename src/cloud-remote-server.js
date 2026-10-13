@@ -4,6 +4,7 @@ import { attachWebSocketServer } from './websocket.js';
 import { createQrDataUrl } from './qr-code.js';
 
 const API = '/api/cloud-remote/';
+const FUNCTION_ROUTE_QUERY = '__gd_route';
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_SESSIONS = 64;
 const MAX_PENDING_PHONES = 8;
@@ -113,6 +114,27 @@ export function attachCloudRemote(server, {
 
   const sessions = new Map();
   const attachedSockets = new Set();
+
+  function normalizeFunctionRoute(request) {
+    let target;
+    try { target = new URL(request.url ?? '/', 'http://gesturedeck.invalid'); } catch { return; }
+    const route = target.searchParams.get(FUNCTION_ROUTE_QUERY);
+    if (!route) return;
+    target.searchParams.delete(FUNCTION_ROUTE_QUERY);
+    const path = {
+      start: `${API}start`,
+      'renew-invite': `${API}renew-invite`,
+      stop: `${API}stop`,
+      presenter: '/ws/cloud-remote/presenter',
+      phone: '/ws/cloud-remote/phone',
+    }[route];
+    if (!path) return;
+    request.url = `${path}${target.search}`;
+  }
+
+  // Vercel rewrites these five endpoints to one exported Node HTTP server so
+  // its API and WebSocket entry points share the same in-process session map.
+  server.prependListener('upgrade', normalizeFunctionRoute);
 
   function removeSession(sessionId, expected) {
     if (sessions.get(sessionId) !== expected) return;
@@ -255,6 +277,7 @@ export function attachCloudRemote(server, {
   const previousListeners = server.listeners('request');
   for (const listener of previousListeners) server.off('request', listener);
   const requestListener = (request, response) => {
+    normalizeFunctionRoute(request);
     if (!request.url?.startsWith(API)) {
       for (const listener of previousListeners) listener.call(server, request, response);
       return;

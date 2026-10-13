@@ -1,0 +1,27 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": "npm run build:vercel",
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/api/cloud-remote/start", "destination": "/api/cloud-remote?__gd_route=start" },
+    { "source": "/api/cloud-remote/renew-invite", "destination": "/api/cloud-remote?__gd_route=renew-invite" },
+    { "source": "/api/cloud-remote/stop", "destination": "/api/cloud-remote?__gd_route=stop" },
+    { "source": "/ws/cloud-remote/presenter", "destination": "/api/cloud-remote?__gd_route=presenter" },
+    { "source": "/ws/cloud-remote/phone", "destination": "/api/cloud-remote?__gd_route=phone" },
+    { "source": "/remote", "destination": "/mobile-remote.html" },
+    { "source": "/r/:id", "destination": "/mobile-remote.html" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self' ws: wss:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" },
+        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
+        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" },
+        { "key": "Cross-Origin-Resource-Policy", "value": "same-origin" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" }
+      ]
+    }
+  ]
+}
