@@ -95,9 +95,12 @@ The mobile remote controls the active sample deck or imported PDF from a phone b
 1. Start GestureDeck and open it on the presenter computer at `http://localhost:5173` (or `http://127.0.0.1:5173`) so the browser can grant camera access. Plain HTTP on a LAN or Tailscale IP cannot access the camera.
 2. Connect both devices to the same trusted Wi-Fi network or Tailscale network.
 3. Choose **Connect phone**, select the private network interface used by the phone, and start the connection.
-4. Scan the QR code or copy the fallback URL to the phone. The pairing link expires after two minutes and can be renewed from the presenter dialog.
-5. Use **Previous**, **Next**, or the numbered slide picker. If Wi-Fi briefly drops, the phone reconnects and restores the current slide position.
-6. Choose **Disconnect** on the phone or **Disconnect phone** in the presenter dialog to end the remote session.
+4. Share the same QR code or fallback URL with up to eight phones. The invite stays valid for five minutes and can be renewed from the presenter dialog; renewing it keeps already paired phones connected.
+5. On first use, a phone can enter an optional name before tapping **Connect**. When no name is entered, GestureDeck makes a best-effort iPhone or Android phone label when the browser reveals a type; otherwise it uses **Phone**. Each phone shows **Connected as [label]**, matching its entry in the presenter list.
+6. Every connected phone has equal **Previous**, **Next**, and numbered-slide control. If Wi-Fi briefly drops, the phone reconnects with the same label and current slide position.
+7. The presenter can disconnect a single phone from its list or choose **Disconnect all** to end the remote session. **Disconnect** on a phone removes only that phone.
+
+Names and coarse device types are used only for the active remote session. For presentation state, each phone receives only slide position and busy state; it does not receive other phones' names or presentation content.
 
 The main GestureDeck server binds to `0.0.0.0`; open it over loopback on the presenter computer for camera access. The QR code or fallback URL uses the selected Wi-Fi or Tailscale address for the phone. The presenter controls stay restricted to connections from that computer. Only while a remote session is active, a separate temporary listener binds to the selected Wi-Fi or Tailscale IPv4 interface and serves the phone controls. It closes when the presenter stops the remote or closes the page. Pair only on a trusted network: local HTTP and WebSocket control traffic is unencrypted outside the Tailscale tunnel.
 

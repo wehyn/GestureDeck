@@ -91,6 +91,10 @@ const elements = {
   pairingUrl: $('pairing-url'),
   copyPairingUrl: $('copy-pairing-url'),
   pairingStatus: $('pairing-status'),
+  pairedPhonesPanel: $('paired-phones-panel'),
+  pairedPhones: $('paired-phones'),
+  pairedPhonesEmpty: $('paired-phones-empty'),
+  pairedPhoneCount: $('paired-phone-count'),
   newPairingLink: $('new-pairing-link'),
   disconnectPhone: $('disconnect-phone'),
   closePairingDialog: $('close-pairing-dialog'),
@@ -137,6 +141,8 @@ let remoteAuthenticated = false;
 let remoteGeneration = 0;
 let remoteStopPromise = null;
 let closingMobileRemote = false;
+let pairedPhones = [];
+let pairingInviteExpired = false;
 let pageIsHiding = false;
 const savedSettings = loadSettings();
 const state = {
@@ -630,6 +636,64 @@ function setPairingStatus(message) {
   setText(elements.pairingStatus, message);
 }
 
+function displayPhoneType(deviceType) {
+  return ({ iphone: 'iPhone', 'android-phone': 'Android phone', phone: 'Phone' })[deviceType] ?? 'Phone';
+}
+
+function renderPairedPhones(phones) {
+  pairedPhones = Array.isArray(phones) ? phones : [];
+  if (!elements.pairedPhones || typeof document.createElement !== 'function') return;
+
+  const rows = pairedPhones.map((phone) => {
+    const row = document.createElement('li');
+    row.className = 'paired-phone-row';
+
+    const info = document.createElement('div');
+    info.className = 'paired-phone-info';
+    const label = document.createElement('span');
+    label.className = 'paired-phone-label';
+    label.textContent = phone.label;
+    const type = document.createElement('span');
+    type.className = 'paired-phone-type';
+    type.textContent = displayPhoneType(phone.deviceType);
+    info.append(label, type);
+
+    const status = document.createElement('span');
+    status.className = 'paired-phone-status';
+    status.dataset.state = phone.status;
+    status.textContent = phone.status === 'connected' ? 'Connected' : 'Reconnecting';
+
+    const remove = document.createElement('button');
+    remove.className = 'paired-phone-remove';
+    remove.type = 'button';
+    remove.textContent = 'Disconnect';
+    remove.setAttribute('aria-label', `Disconnect ${phone.label}`);
+    remove.addEventListener('click', () => {
+      if (mobileRemoteClient?.removePhone(phone.phoneId)) {
+        setPairingStatus(`Disconnecting ${phone.label}…`);
+      }
+    });
+
+    row.append(info, status, remove);
+    return row;
+  });
+  elements.pairedPhones.replaceChildren(...rows);
+  setText(elements.pairedPhoneCount, `${pairedPhones.length} / 8`);
+  show(elements.pairedPhonesEmpty, pairedPhones.length === 0);
+  show(elements.pairedPhonesPanel, remoteActive && remoteAuthenticated);
+
+  if (pairingInviteExpired || !remoteAuthenticated) return;
+  if (pairedPhones.length === 0) {
+    setPairingStatus('Waiting for phones to connect. Share this same link with up to eight phones.');
+    return;
+  }
+  const connected = pairedPhones.filter((phone) => phone.status === 'connected').length;
+  const reconnecting = pairedPhones.length - connected;
+  const pairedText = `${pairedPhones.length} phone${pairedPhones.length === 1 ? '' : 's'} paired`;
+  const statusText = `${connected} connected${reconnecting ? ` · ${reconnecting} reconnecting` : ''}`;
+  setPairingStatus(`${pairedText} · ${statusText}`);
+}
+
 function updatePairingStartButton() {
   if (elements.startPhoneRemote) {
     elements.startPhoneRemote.disabled = remoteStarting || remoteActive || !elements.pairingInterface?.value;
@@ -659,9 +723,11 @@ function resetPairingUi() {
   remoteActive = false;
   remoteStarting = false;
   remoteAuthenticated = false;
+  pairingInviteExpired = false;
   clearPairingMaterial();
   show(elements.newPairingLink, false);
   show(elements.disconnectPhone, false);
+  renderPairedPhones([]);
   setPairingStatus('Disconnected');
   updatePairingStartButton();
 }
@@ -726,16 +792,24 @@ function handleMobileRemoteConnection(event, generation) {
   if (event.type === 'authenticated') {
     remoteAuthenticated = true;
     revealPairingMaterial();
+    setText(elements.newPairingLink, 'Renew pairing link');
+    show(elements.newPairingLink, true);
     setPairingStatus('Waiting for your phone to connect');
+    renderPairedPhones(pairedPhones);
     return;
   }
   if (event.type === 'phonePaired') {
-    setPairingStatus('Phone connected');
-    show(elements.newPairingLink, false);
+    setPairingStatus('Phone connected. The same link remains available to other phones.');
+    return;
+  }
+  if (event.type === 'phones') {
+    renderPairedPhones(event.phones);
     return;
   }
   if (event.type === 'inviteExpired') {
+    pairingInviteExpired = true;
     clearPairingMaterial();
+    setText(elements.newPairingLink, 'New pairing link');
     show(elements.newPairingLink, true);
     setPairingStatus('Pairing link expired. Create a new pairing link to continue.');
     return;
@@ -760,6 +834,8 @@ async function startMobileRemote() {
   }
   const generation = ++remoteGeneration;
   remoteStarting = true;
+  pairedPhones = [];
+  pairingInviteExpired = false;
   updatePairingStartButton();
   if (elements.pairingInterface) elements.pairingInterface.disabled = true;
   show(elements.newPairingLink, false);
@@ -781,6 +857,7 @@ async function startMobileRemote() {
       throw new Error('The pairing service returned incomplete connection details.');
     }
     pendingPairingInvite = { qrDataUrl: result.qrDataUrl, fallbackUrl: result.fallbackUrl };
+    pairingInviteExpired = false;
     remoteStarting = false;
     remoteActive = true;
     show(elements.disconnectPhone, true);
@@ -823,10 +900,14 @@ async function renewPairingInvite() {
       throw new Error('The pairing service returned an incomplete pairing link.');
     }
     pendingPairingInvite = { qrDataUrl: result.qrDataUrl, fallbackUrl: result.fallbackUrl };
+    pairingInviteExpired = false;
+    setText(elements.newPairingLink, 'Renew pairing link');
     revealPairingMaterial();
-    setPairingStatus('Waiting for your phone to connect');
+    show(elements.newPairingLink, true);
+    renderPairedPhones(pairedPhones);
   } catch (error) {
     if (generation !== remoteGeneration) return;
+    setText(elements.newPairingLink, pairingInviteExpired ? 'New pairing link' : 'Renew pairing link');
     show(elements.newPairingLink, true);
     setPairingStatus(`Could not create a new pairing link. ${error.message}`);
   }

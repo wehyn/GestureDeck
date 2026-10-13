@@ -1,4 +1,6 @@
 const PRESENTER_PATH = '/ws/mobile-remote/presenter';
+const PHONE_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+const DEVICE_TYPES = new Set(['iphone', 'android-phone', 'phone']);
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -30,10 +32,29 @@ function validCommand(message) {
     && message.index >= 0;
 }
 
+function validPhoneList(message) {
+  if (Object.keys(message).sort().join(',') !== 'phones,type'
+    || message.type !== 'phones'
+    || !Array.isArray(message.phones)
+    || message.phones.length > 8) return false;
+  const ids = new Set();
+  return message.phones.every((phone) => {
+    if (!isRecord(phone)
+      || Object.keys(phone).sort().join(',') !== 'deviceType,label,phoneId,status'
+      || typeof phone.phoneId !== 'string' || !PHONE_ID_PATTERN.test(phone.phoneId)
+      || ids.has(phone.phoneId)
+      || typeof phone.label !== 'string' || phone.label.length < 1 || phone.label.length > 64
+      || !DEVICE_TYPES.has(phone.deviceType)
+      || !['connected', 'reconnecting'].includes(phone.status)) return false;
+    ids.add(phone.phoneId);
+    return true;
+  });
+}
+
 /**
  * Connect a presenter to its local server. onConnection receives
  * { type: 'authenticated' | 'rejected' | 'closed' | 'phonePaired' |
- *   'inviteExpired' | 'sessionEnded', reason?: string }.
+ *   'phones' | 'inviteExpired' | 'sessionEnded', reason?: string }.
  * Only rejection includes a reason. No reconnect is attempted.
  */
 export function createMobileRemoteClient({
@@ -60,7 +81,13 @@ export function createMobileRemoteClient({
   function isOpen() { return socket?.readyState === (WebSocketImpl.OPEN ?? 1); }
 
   function send(message) {
-    if (!closed && isOpen()) socket.send(JSON.stringify(message));
+    if (closed || !isOpen()) return false;
+    try {
+      socket.send(JSON.stringify(message));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   function publishState(snapshot) {
@@ -91,6 +118,15 @@ export function createMobileRemoteClient({
       return;
     }
     if (!authenticated) return;
+    if (message.type === 'phones') {
+      if (validPhoneList(message)) {
+        onConnection({
+          type: 'phones',
+          phones: message.phones.map(({ phoneId, label, deviceType, status }) => ({ phoneId, label, deviceType, status })),
+        });
+      }
+      return;
+    }
     if (validCommand(message)) {
       const command = message.action === 'goTo'
         ? { action: message.action, index: message.index }
@@ -127,5 +163,10 @@ export function createMobileRemoteClient({
     onConnection({ type: 'closed' });
   }
 
-  return { connect, publishState, close };
+  function removePhone(phoneId) {
+    if (!authenticated || !isOpen() || typeof phoneId !== 'string' || !PHONE_ID_PATTERN.test(phoneId)) return false;
+    return send({ type: 'removePhone', phoneId });
+  }
+
+  return { connect, publishState, removePhone, close };
 }

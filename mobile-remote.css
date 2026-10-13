@@ -153,6 +153,77 @@ h1 {
 .connection-copy[data-state="connected"] { color: var(--good); }
 .connection-copy[data-state="error"] { color: #ffc3a9; }
 
+.pairing-panel {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: rgba(32, 45, 39, .66);
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+}
+
+.pairing-panel h2 {
+  margin: .32rem 0 1rem;
+  font-size: 1.12rem;
+  font-weight: 650;
+  letter-spacing: -.025em;
+}
+
+.pairing-panel label {
+  display: block;
+  margin-bottom: .45rem;
+  color: var(--paper);
+  font-size: .82rem;
+  font-weight: 620;
+}
+
+.pairing-panel label span { color: var(--muted); font-weight: 450; }
+
+.pairing-panel input {
+  width: 100%;
+  min-height: 3.1rem;
+  padding: .65rem .8rem;
+  border: 1px solid rgba(240, 238, 230, .2);
+  border-radius: .8rem;
+  background: #111a16;
+  color: var(--paper);
+  font-size: .95rem;
+}
+
+.pairing-panel input::placeholder { color: var(--muted-dim); }
+
+.pairing-help {
+  margin: .55rem 0 0;
+  color: var(--muted);
+  font-size: .75rem;
+  line-height: 1.45;
+}
+
+.connect-button {
+  width: 100%;
+  min-height: 3.2rem;
+  margin-top: .85rem;
+  border: 0;
+  border-radius: .8rem;
+  background: var(--signal);
+  color: #24190f;
+  font-size: .95rem;
+  font-weight: 750;
+  transition: background-color 120ms ease, transform 120ms ease;
+}
+
+.connect-button:not(:disabled):hover { background: #f0b668; }
+.connect-button:not(:disabled):active { transform: translateY(1px) scale(.99); }
+
+.connected-as {
+  margin: .75rem .2rem 0;
+  padding: .65rem .8rem;
+  border-left: 2px solid var(--good);
+  color: var(--good);
+  font-size: .82rem;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
 .controller {
   margin-top: 1rem;
   padding: 1.15rem;

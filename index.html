@@ -275,7 +275,7 @@
         </div>
         <button id="close-pairing-dialog" class="button button-secondary pairing-close" type="button">Close</button>
       </div>
-      <p id="pairing-description" class="pairing-description">Choose the private network your phone uses. Pair only on a trusted local network. The phone receives slide position and navigation controls only.</p>
+      <p id="pairing-description" class="pairing-description">Choose the private network your phones use. One QR code and link can pair up to eight phones for five minutes. Pair only on a trusted local network; phones receive slide position and navigation controls only.</p>
 
       <div class="pairing-interface-row">
         <label for="pairing-interface">Private network interface</label>
@@ -290,7 +290,7 @@
 
       <figure id="pairing-qr-panel" class="pairing-qr-panel" hidden>
         <img id="pairing-qr" alt="QR code for the phone pairing link">
-        <figcaption>Scan this code with your phone camera.</figcaption>
+        <figcaption>Share this same code with up to eight phones.</figcaption>
       </figure>
 
       <div id="pairing-url-panel" class="pairing-url-panel" hidden>
@@ -301,9 +301,18 @@
         </div>
       </div>
 
+      <section id="paired-phones-panel" class="paired-phones-panel" aria-labelledby="paired-phones-title" hidden>
+        <div class="paired-phones-heading">
+          <h3 id="paired-phones-title">Paired phones</h3>
+          <span id="paired-phone-count">0 / 8</span>
+        </div>
+        <p id="paired-phones-empty" class="paired-phones-empty">Share the same QR code or link with up to eight phones.</p>
+        <ul id="paired-phones" class="paired-phones-list" aria-live="polite" aria-relevant="additions removals text"></ul>
+      </section>
+
       <div class="pairing-dialog-actions">
-        <button id="new-pairing-link" class="button button-secondary" type="button" hidden>New pairing link</button>
-        <button id="disconnect-phone" class="button button-secondary" type="button" hidden>Disconnect phone</button>
+        <button id="new-pairing-link" class="button button-secondary" type="button" hidden>Renew pairing link</button>
+        <button id="disconnect-phone" class="button button-secondary" type="button" hidden>Disconnect all</button>
       </div>
     </dialog>
     <script type="module" src="app.js"></script>
