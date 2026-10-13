@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { Redis } from '@upstash/redis';
+import { WebSocket, WebSocketServer } from 'ws';
 import { createQrDataUrl } from './qr-code.js';
-import { attachWebSocketServer } from './websocket.js';
 
 const API = '/api/cloud-remote/';
 const FUNCTION_ROUTE_QUERY = '__gd_route';
@@ -195,6 +196,41 @@ async function latestEventId(redis, streamKey) {
   return '0-0';
 }
 
+function attachCloudWebSocketServer(server, { path, verifyRequest, onConnection }) {
+  const webSockets = new WebSocketServer({
+    server,
+    path,
+    maxPayload: MAX_BODY_BYTES,
+    perMessageDeflate: false,
+    verifyClient: ({ req }) => verifyRequest(req),
+  });
+  webSockets.on('connection', (webSocket, request) => {
+    const connection = new EventEmitter();
+    connection.send = (value) => {
+      if (webSocket.readyState !== WebSocket.OPEN) return false;
+      webSocket.send(JSON.stringify(value));
+      return true;
+    };
+    connection.close = (code = 1000, reason = '') => webSocket.close(code, reason);
+    connection.destroy = () => webSocket.terminate();
+    webSocket.on('message', (data, isBinary) => {
+      if (isBinary) { webSocket.close(1003, 'Expected JSON text'); return; }
+      let message;
+      try { message = JSON.parse(data.toString('utf8')); }
+      catch { webSocket.close(1007, 'Expected JSON text'); return; }
+      connection.emit('message', message);
+    });
+    webSocket.once('close', (code, reason) => connection.emit('close', code, reason.toString('utf8')));
+    webSocket.on('error', () => {});
+    try { onConnection(connection, request); }
+    catch { connection.close(1011, 'Connection setup failed'); }
+  });
+  return () => {
+    for (const webSocket of webSockets.clients) webSocket.close(1001, 'Server shutting down');
+    webSockets.close();
+  };
+}
+
 export function attachRedisCloudRemote(server, { redis = makeRedis() } = {}) {
   const sockets = new Set();
 
@@ -222,15 +258,13 @@ export function attachRedisCloudRemote(server, { redis = makeRedis() } = {}) {
     },
   };
 
-  const detachPresenter = attachWebSocketServer(server, {
-    ...wsOptions,
+  const detachPresenter = attachCloudWebSocketServer(server, {
     path: '/ws/cloud-remote/presenter',
     verifyRequest: (request) => wsOptions.verifyRequest(request, '/ws/cloud-remote/presenter'),
     onConnection(socket, request) { sockets.add(socket); void handlePresenter(socket, request); },
   });
 
-  const detachPhone = attachWebSocketServer(server, {
-    ...wsOptions,
+  const detachPhone = attachCloudWebSocketServer(server, {
     path: '/ws/cloud-remote/phone',
     verifyRequest: (request) => wsOptions.verifyRequest(request, '/ws/cloud-remote/phone'),
     onConnection(socket, request) { sockets.add(socket); void handlePhone(socket, request); },
