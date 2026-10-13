@@ -183,6 +183,7 @@ export function attachMobileRemote(server, {
           authenticated = true;
           clearAuthTimeout(timer);
           socket.send({ type: 'presenterReady' });
+          session.publishPhoneList();
           return;
         }
         session?.handlePresenterMessage(socket, message);
