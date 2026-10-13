@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#101916">
+    <title>GestureDeck Remote</title>
+    <link rel="stylesheet" href="/mobile-remote.css">
+    <script type="module" src="/src/mobile-remote-phone.js"></script>
+  </head>
+  <body>
+    <main class="remote-shell" aria-labelledby="remote-title">
+      <header class="masthead">
+        <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div>
+          <p class="eyebrow">GESTUREDECK <span>·</span> LOCAL REMOTE</p>
+          <h1 id="remote-title">Slide control</h1>
+        </div>
+      </header>
+
+      <section class="connection-panel" aria-label="Connection status">
+        <span class="connection-light" aria-hidden="true"></span>
+        <p id="connection-status" class="connection-copy" role="status" aria-live="polite">Connecting to presenter…</p>
+      </section>
+
+      <section class="controller" aria-label="Presentation controls">
+        <div class="position-block" aria-live="polite">
+          <span class="position-label">CURRENT SLIDE</span>
+          <p id="slide-position" class="slide-position">— / —</p>
+        </div>
+
+        <div class="transport-row">
+          <button id="previous-button" class="transport-button transport-button--previous" type="button" aria-label="Previous slide" disabled>
+            <span class="arrow arrow--left" aria-hidden="true"></span>
+            <span>Previous</span>
+          </button>
+          <button id="next-button" class="transport-button transport-button--next" type="button" aria-label="Next slide" disabled>
+            <span>Next</span>
+            <span class="arrow arrow--right" aria-hidden="true"></span>
+          </button>
+        </div>
+
+        <div class="jump-panel">
+          <label for="slide-number">Go to slide</label>
+          <div class="jump-row">
+            <input id="slide-number" name="slide-number" type="number" inputmode="numeric" min="1" step="1" placeholder="1" aria-label="Slide number" disabled>
+            <button id="go-button" class="go-button" type="button" disabled>Go</button>
+          </div>
+        </div>
+      </section>
+
+      <p id="action-status" class="action-status" role="status" aria-live="polite"></p>
+
+      <footer class="footer">
+        <p>Local control · use a trusted Wi-Fi network.</p>
+        <button id="disconnect-button" class="disconnect-button" type="button">Disconnect</button>
+      </footer>
+    </main>
+  </body>
+</html>

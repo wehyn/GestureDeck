@@ -5,6 +5,7 @@ import { extractHandSample, updateRecognizerWithHandSample } from './src/hand-tr
 import { createLocalHandLandmarker } from './src/local-hand-tracker.js';
 import { openPdfPresentation } from './src/pdf-presentation.js';
 import { PresentationController } from './src/presentation.js';
+import { createMobileRemoteClient } from './src/mobile-remote-client.js';
 import { SwipeRecognizer } from './src/gesture-engine.js';
 
 const $ = (id) => document.getElementById(id);
@@ -80,6 +81,19 @@ const elements = {
   sampleCanvasTopline: $('sample-canvas-topline'),
   sampleCanvasContent: $('sample-canvas-content'),
   sampleCanvasFooter: $('sample-canvas-footer'),
+  connectPhone: $('connect-phone'),
+  pairingDialog: $('pairing-dialog'),
+  pairingInterface: $('pairing-interface'),
+  startPhoneRemote: $('start-phone-remote'),
+  pairingQrPanel: $('pairing-qr-panel'),
+  pairingQr: $('pairing-qr'),
+  pairingUrlPanel: $('pairing-url-panel'),
+  pairingUrl: $('pairing-url'),
+  copyPairingUrl: $('copy-pairing-url'),
+  pairingStatus: $('pairing-status'),
+  newPairingLink: $('new-pairing-link'),
+  disconnectPhone: $('disconnect-phone'),
+  closePairingDialog: $('close-pairing-dialog'),
 };
 
 const slides = [
@@ -114,6 +128,16 @@ const slides = [
 ];
 
 const presentation = new PresentationController(slides);
+let mobileRemoteClient = null;
+let pairingReturnFocus = null;
+let pendingPairingInvite = null;
+let remoteActive = false;
+let remoteStarting = false;
+let remoteAuthenticated = false;
+let remoteGeneration = 0;
+let remoteStopPromise = null;
+let closingMobileRemote = false;
+let pageIsHiding = false;
 const savedSettings = loadSettings();
 const state = {
   mode: 'idle',
@@ -285,7 +309,9 @@ function showError(error) {
   } else if (name === 'NotReadableError' || name === 'TrackStartError') {
     message = 'The camera is busy or unavailable. Close other camera apps and try again.';
   } else if (name === 'NotSupportedError') {
-    message = 'This browser does not provide camera access. Open GestureDeck on localhost in a supported browser.';
+    message = window.isSecureContext === false
+      ? 'Camera access is blocked on this HTTP address. Open GestureDeck on this computer at http://localhost:5173; use the private network address on your phone.'
+      : 'This browser does not provide camera access. Try a current version of Chrome, Safari, Firefox, or Edge.';
   } else if (name === 'OverconstrainedError') {
     message = 'The selected camera is unavailable. Choose another camera or use the default, then try again.';
   } else if (error?.message?.includes('hand_landmarker.task')) {
@@ -430,6 +456,7 @@ function syncPdfFullscreen() {
 
 function renderSourceUi() {
   const pdfActive = Boolean(state.pdf);
+  show(elements.connectPhone, true);
   show(elements.sampleCanvasTopline, !pdfActive);
   show(elements.sampleCanvasContent, !pdfActive);
   show(elements.sampleCanvasFooter, !pdfActive);
@@ -459,6 +486,7 @@ async function renderPdfPage(index) {
   const pdf = state.pdf;
   const token = ++state.pdfRenderToken;
   state.pdfRendering = true;
+  publishRemoteState();
   renderSlide({ renderPdf: false });
   setPdfStatus(`Rendering page ${index + 1}…`);
   const canvas = document.createElement('canvas');
@@ -478,6 +506,7 @@ async function renderPdfPage(index) {
   } finally {
     if (token === state.pdfRenderToken) {
       state.pdfRendering = false;
+      publishRemoteState();
       renderSlide({ renderPdf: false });
     }
   }
@@ -524,17 +553,320 @@ function showGestureToast(message) {
 }
 
 export function announceAction(action, source = 'manual') {
-  if (state.pdfRendering) return;
+  if (state.pdfRendering || (action !== 'next' && action !== 'previous')) return false;
   const before = presentation.getSnapshot().index;
   if (action === 'next') presentation.next();
   else presentation.previous();
   const after = presentation.getSnapshot().index;
   renderSlide();
   const moved = before !== after;
+  if (moved) publishRemoteState();
   const copy = moved
     ? action === 'next' ? 'Next slide' : 'Previous'
     : action === 'next' ? 'Already on the last slide' : 'Already on the first slide';
   showGestureToast(source === 'gesture' && moved ? `${copy} · hand gesture` : copy);
+  return true;
+}
+
+function remoteSnapshot() {
+  const { index, total } = presentation.getSnapshot();
+  return { index, total, busy: state.pdfRendering };
+}
+
+function publishRemoteState() {
+  mobileRemoteClient?.publishState(remoteSnapshot());
+}
+
+export function goToSlide(index, source = 'manual') {
+  const { index: before, total } = presentation.getSnapshot();
+  if (state.pdfRendering || !Number.isSafeInteger(index) || index < 0 || index >= total) return false;
+  if (index === before) return true;
+  presentation.goTo(index);
+  renderSlide();
+  publishRemoteState();
+  if (source === 'remote') showGestureToast(`Slide ${index + 1}`);
+  return true;
+}
+
+function handleRemoteCommand(command) {
+  if (!command || typeof command !== 'object' || Array.isArray(command) || state.pdfRendering) return false;
+  if (command.action === 'goTo') {
+    if (Object.keys(command).sort().join(',') !== 'action,index') return false;
+    return goToSlide(command.index, 'remote');
+  }
+  if ((command.action === 'previous' || command.action === 'next')
+    && Object.keys(command).join(',') === 'action') return announceAction(command.action, 'remote');
+  return false;
+}
+
+/** Connect after /api/mobile-remote/start returns its hostCredential. */
+export function connectMobileRemote({ hostCredential, WebSocketImpl, onConnection } = {}) {
+  mobileRemoteClient?.close();
+  mobileRemoteClient = createMobileRemoteClient({
+    hostCredential, WebSocketImpl, onConnection,
+    onCommand: handleRemoteCommand,
+    location: window.location,
+  });
+  mobileRemoteClient.publishState(remoteSnapshot());
+  mobileRemoteClient.connect();
+  return mobileRemoteClient;
+}
+
+async function requestMobileRemote(path, { method = 'GET', body, keepalive = false } = {}) {
+  const options = { method, headers: {} };
+  if (body !== undefined) {
+    options.headers['content-type'] = 'application/json';
+    options.body = JSON.stringify(body);
+  }
+  if (keepalive) options.keepalive = true;
+  const response = await fetch(`/api/mobile-remote/${path}`, options);
+  let payload = {};
+  try { payload = await response.json(); } catch { /* Report a stable fallback below. */ }
+  if (!response.ok) throw new Error(payload.error || `Request failed (${response.status || 'unknown'})`);
+  return payload;
+}
+
+function setPairingStatus(message) {
+  setText(elements.pairingStatus, message);
+}
+
+function updatePairingStartButton() {
+  if (elements.startPhoneRemote) {
+    elements.startPhoneRemote.disabled = remoteStarting || remoteActive || !elements.pairingInterface?.value;
+  }
+}
+
+function clearPairingMaterial() {
+  pendingPairingInvite = null;
+  show(elements.pairingQrPanel, false);
+  show(elements.pairingUrlPanel, false);
+  if (elements.pairingQr) {
+    elements.pairingQr.removeAttribute?.('src');
+    if (!elements.pairingQr.removeAttribute) elements.pairingQr.src = '';
+  }
+  if (elements.pairingUrl) elements.pairingUrl.value = '';
+}
+
+function revealPairingMaterial() {
+  if (!remoteAuthenticated || !pendingPairingInvite) return;
+  if (elements.pairingQr) elements.pairingQr.src = pendingPairingInvite.qrDataUrl;
+  if (elements.pairingUrl) elements.pairingUrl.value = pendingPairingInvite.fallbackUrl;
+  show(elements.pairingQrPanel, true);
+  show(elements.pairingUrlPanel, true);
+}
+
+function resetPairingUi() {
+  remoteActive = false;
+  remoteStarting = false;
+  remoteAuthenticated = false;
+  clearPairingMaterial();
+  show(elements.newPairingLink, false);
+  show(elements.disconnectPhone, false);
+  setPairingStatus('Disconnected');
+  updatePairingStartButton();
+}
+
+function restorePairingFocus() {
+  const target = pairingReturnFocus;
+  pairingReturnFocus = null;
+  target?.focus?.({ preventScroll: true });
+}
+
+async function loadPairingInterfaces() {
+  if (!elements.pairingInterface) return;
+  const selectedBeforeRefresh = elements.pairingInterface.value;
+  try {
+    const result = await requestMobileRemote('interfaces');
+    const addresses = Array.isArray(result.interfaces)
+      ? result.interfaces.filter((address) => typeof address === 'string' && address.length > 0)
+      : [];
+    if (typeof document.createElement === 'function' && elements.pairingInterface.replaceChildren) {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = addresses.length ? 'Choose an interface' : 'No private interfaces found';
+      elements.pairingInterface.replaceChildren(placeholder);
+      for (const address of addresses) {
+        const option = document.createElement('option');
+        option.value = address;
+        option.textContent = address;
+        elements.pairingInterface.append(option);
+      }
+    }
+    const availableSelection = addresses.includes(selectedBeforeRefresh) ? selectedBeforeRefresh : '';
+    elements.pairingInterface.value = availableSelection;
+    elements.pairingInterface.disabled = addresses.length === 0 || remoteActive || remoteStarting;
+    updatePairingStartButton();
+    if (!remoteActive && !remoteStarting) {
+      setPairingStatus(addresses.length
+        ? 'Disconnected'
+        : 'No private network interface is available. Connect this computer and your phone to the same local network.');
+    }
+  } catch (error) {
+    elements.pairingInterface.disabled = true;
+    updatePairingStartButton();
+    if (!remoteActive && !remoteStarting) setPairingStatus(`Could not find private network interfaces. ${error.message}`);
+  }
+}
+
+function openPairingDialog() {
+  if (!elements.pairingDialog) return;
+  pairingReturnFocus = document.activeElement ?? elements.connectPhone;
+  if (!elements.pairingDialog.open) elements.pairingDialog.showModal();
+  elements.pairingInterface?.focus?.({ preventScroll: true });
+  return loadPairingInterfaces();
+}
+
+function closePairingDialog() {
+  if (elements.pairingDialog?.open) elements.pairingDialog.close();
+  else restorePairingFocus();
+}
+
+function handleMobileRemoteConnection(event, generation) {
+  if (generation !== remoteGeneration || closingMobileRemote) return;
+  if (event.type === 'authenticated') {
+    remoteAuthenticated = true;
+    revealPairingMaterial();
+    setPairingStatus('Waiting for your phone to connect');
+    return;
+  }
+  if (event.type === 'phonePaired') {
+    setPairingStatus('Phone connected');
+    show(elements.newPairingLink, false);
+    return;
+  }
+  if (event.type === 'inviteExpired') {
+    clearPairingMaterial();
+    show(elements.newPairingLink, true);
+    setPairingStatus('Pairing link expired. Create a new pairing link to continue.');
+    return;
+  }
+  if (event.type === 'rejected') {
+    clearPairingMaterial();
+    setPairingStatus('The presenter connection was rejected. Disconnect and try again.');
+    return;
+  }
+  if (event.type === 'closed' || event.type === 'sessionEnded') {
+    if (!remoteActive) return;
+    void stopMobileRemote({ force: true });
+  }
+}
+
+async function startMobileRemote() {
+  if (remoteActive || remoteStarting) return;
+  const address = elements.pairingInterface?.value;
+  if (!address) {
+    setPairingStatus('Choose a private network interface first.');
+    return;
+  }
+  const generation = ++remoteGeneration;
+  remoteStarting = true;
+  updatePairingStartButton();
+  if (elements.pairingInterface) elements.pairingInterface.disabled = true;
+  show(elements.newPairingLink, false);
+  clearPairingMaterial();
+  setPairingStatus('Starting the phone connection…');
+  let serverStarted = false;
+  try {
+    const result = await requestMobileRemote('start', {
+      method: 'POST',
+      body: { address, state: remoteSnapshot() },
+    });
+    serverStarted = true;
+    if (generation !== remoteGeneration) {
+      void requestMobileRemote('stop', { method: 'POST', body: {}, keepalive: pageIsHiding }).catch(() => {});
+      return;
+    }
+    if (typeof result.hostCredential !== 'string' || !result.hostCredential
+      || typeof result.qrDataUrl !== 'string' || typeof result.fallbackUrl !== 'string') {
+      throw new Error('The pairing service returned incomplete connection details.');
+    }
+    pendingPairingInvite = { qrDataUrl: result.qrDataUrl, fallbackUrl: result.fallbackUrl };
+    remoteStarting = false;
+    remoteActive = true;
+    show(elements.disconnectPhone, true);
+    setPairingStatus('Waiting for the presenter connection…');
+    updatePairingStartButton();
+    mobileRemoteClient = connectMobileRemote({
+      hostCredential: result.hostCredential,
+      onConnection: (event) => handleMobileRemoteConnection(event, generation),
+    });
+  } catch (error) {
+    if (serverStarted) {
+      closingMobileRemote = true;
+      mobileRemoteClient?.close();
+      mobileRemoteClient = null;
+      closingMobileRemote = false;
+      void requestMobileRemote('stop', { method: 'POST', body: {}, keepalive: pageIsHiding }).catch(() => {});
+    }
+    if (generation !== remoteGeneration) return;
+    remoteStarting = false;
+    remoteActive = false;
+    remoteAuthenticated = false;
+    clearPairingMaterial();
+    show(elements.newPairingLink, false);
+    show(elements.disconnectPhone, false);
+    if (elements.pairingInterface) elements.pairingInterface.disabled = false;
+    setPairingStatus(`Could not start the phone connection. ${error.message}`);
+    updatePairingStartButton();
+  }
+}
+
+async function renewPairingInvite() {
+  if (!remoteActive || !remoteAuthenticated) return;
+  show(elements.newPairingLink, false);
+  setPairingStatus('Creating a new pairing link…');
+  const generation = remoteGeneration;
+  try {
+    const result = await requestMobileRemote('renew-invite', { method: 'POST', body: {} });
+    if (generation !== remoteGeneration || !remoteActive || !remoteAuthenticated) return;
+    if (typeof result.qrDataUrl !== 'string' || typeof result.fallbackUrl !== 'string') {
+      throw new Error('The pairing service returned an incomplete pairing link.');
+    }
+    pendingPairingInvite = { qrDataUrl: result.qrDataUrl, fallbackUrl: result.fallbackUrl };
+    revealPairingMaterial();
+    setPairingStatus('Waiting for your phone to connect');
+  } catch (error) {
+    if (generation !== remoteGeneration) return;
+    show(elements.newPairingLink, true);
+    setPairingStatus(`Could not create a new pairing link. ${error.message}`);
+  }
+}
+
+async function stopMobileRemote({ keepalive = false, force = false } = {}) {
+  if (remoteStopPromise) return remoteStopPromise;
+  const shouldPostStop = force || remoteActive || remoteStarting;
+  ++remoteGeneration;
+  closingMobileRemote = true;
+  const client = mobileRemoteClient;
+  mobileRemoteClient = null;
+  client?.close();
+  closingMobileRemote = false;
+  if (elements.pairingInterface) elements.pairingInterface.disabled = false;
+  resetPairingUi();
+  if (!shouldPostStop) return;
+  remoteStopPromise = requestMobileRemote('stop', { method: 'POST', body: {}, keepalive })
+    .catch(() => {})
+    .finally(() => { remoteStopPromise = null; });
+  return remoteStopPromise;
+}
+
+async function copyPairingUrl() {
+  const value = elements.pairingUrl?.value;
+  if (!value) return;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      setPairingStatus('Pairing URL copied');
+    } else {
+      elements.pairingUrl.focus?.();
+      elements.pairingUrl.select?.();
+      setPairingStatus('Pairing URL selected. Copy it and open it on your phone.');
+    }
+  } catch {
+    elements.pairingUrl.focus?.();
+    elements.pairingUrl.select?.();
+    setPairingStatus('Pairing URL selected. Copy it and open it on your phone.');
+  }
 }
 
 function mappedAction(action) {
@@ -872,6 +1204,7 @@ async function loadPdfFile(file) {
       type: 'pdf', pageNumber: index + 1,
     })));
     renderSlide({ renderPdf: false });
+    publishRemoteState();
     copyPdfCanvas(firstPage);
     setPdfStatus(`${file.name} opened · ${candidate.numPages} ${candidate.numPages === 1 ? 'page' : 'pages'}`);
     setPdfError(null);
@@ -898,6 +1231,7 @@ async function restoreSampleDeck() {
   setPdfStatus(null);
   setPdfError(null);
   renderSlide();
+  publishRemoteState();
   if (previous) void previous.destroy();
 }
 
@@ -947,6 +1281,14 @@ function resetSettings() {
 }
 
 function bindEvents() {
+  elements.connectPhone?.addEventListener('click', () => openPairingDialog());
+  elements.closePairingDialog?.addEventListener('click', closePairingDialog);
+  elements.pairingDialog?.addEventListener('close', restorePairingFocus);
+  elements.pairingInterface?.addEventListener('change', updatePairingStartButton);
+  elements.startPhoneRemote?.addEventListener('click', startMobileRemote);
+  elements.newPairingLink?.addEventListener('click', renewPairingInvite);
+  elements.disconnectPhone?.addEventListener('click', () => stopMobileRemote());
+  elements.copyPairingUrl?.addEventListener('click', copyPairingUrl);
   elements.openPdf?.addEventListener('click', () => elements.pdfFile?.click());
   elements.pdfFile?.addEventListener('change', (event) => {
     const file = event.currentTarget.files?.[0];
@@ -1002,6 +1344,8 @@ function bindEvents() {
   });
 
   window.addEventListener('pagehide', () => {
+    pageIsHiding = true;
+    const remoteStop = stopMobileRemote({ keepalive: true, force: true });
     clearFullscreenToolbarTimer();
     state.pdfImportToken += 1;
     state.pdfRenderToken += 1;
@@ -1015,6 +1359,7 @@ function bindEvents() {
     setMode('idle');
     camera.stop();
     closeLandmarker();
+    return remoteStop;
   });
 }
 

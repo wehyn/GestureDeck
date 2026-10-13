@@ -68,6 +68,7 @@
               </div>
               <div class="deck-heading-actions">
                 <span id="deck-format" class="deck-format"><span class="format-dot" aria-hidden="true"></span><span id="deck-format-label">Browser · Sample deck</span></span>
+                <button id="connect-phone" class="button button-secondary deck-file-button" type="button">Connect phone</button>
                 <button id="open-pdf" class="button button-secondary deck-file-button" type="button">Open PDF</button>
                 <button id="sample-deck" class="button button-secondary deck-file-button" type="button" hidden>Back to sample deck</button>
                 <button id="enter-pdf-fullscreen" class="button button-secondary deck-file-button" type="button" hidden>Present fullscreen</button>
@@ -265,6 +266,46 @@
         </footer>
       </main>
     </div>
+
+    <dialog id="pairing-dialog" class="pairing-dialog" aria-labelledby="pairing-title" aria-describedby="pairing-description">
+      <div class="pairing-dialog-header">
+        <div>
+          <p class="eyebrow">LOCAL NETWORK REMOTE</p>
+          <h2 id="pairing-title">Connect your phone</h2>
+        </div>
+        <button id="close-pairing-dialog" class="button button-secondary pairing-close" type="button">Close</button>
+      </div>
+      <p id="pairing-description" class="pairing-description">Choose the private network your phone uses. Pair only on a trusted local network. The phone receives slide position and navigation controls only.</p>
+
+      <div class="pairing-interface-row">
+        <label for="pairing-interface">Private network interface</label>
+        <select id="pairing-interface" name="pairing-interface" aria-describedby="pairing-interface-help">
+          <option value="">Choose an interface</option>
+        </select>
+        <p id="pairing-interface-help" class="pairing-help">Connect both devices to the same Wi-Fi or Tailscale network.</p>
+        <button id="start-phone-remote" class="button button-primary" type="button" disabled>Start phone connection</button>
+      </div>
+
+      <p id="pairing-status" class="pairing-status" role="status" aria-live="polite" aria-atomic="true">Disconnected</p>
+
+      <figure id="pairing-qr-panel" class="pairing-qr-panel" hidden>
+        <img id="pairing-qr" alt="QR code for the phone pairing link">
+        <figcaption>Scan this code with your phone camera.</figcaption>
+      </figure>
+
+      <div id="pairing-url-panel" class="pairing-url-panel" hidden>
+        <label for="pairing-url">Pairing URL</label>
+        <div class="pairing-url-row">
+          <input id="pairing-url" type="url" readonly spellcheck="false" autocomplete="off">
+          <button id="copy-pairing-url" class="button button-secondary" type="button">Copy pairing URL</button>
+        </div>
+      </div>
+
+      <div class="pairing-dialog-actions">
+        <button id="new-pairing-link" class="button button-secondary" type="button" hidden>New pairing link</button>
+        <button id="disconnect-phone" class="button button-secondary" type="button" hidden>Disconnect phone</button>
+      </div>
+    </dialog>
     <script type="module" src="app.js"></script>
   </body>
 </html>

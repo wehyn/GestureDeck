@@ -13,6 +13,8 @@ class FakeElement {
     this.hidden = false;
     this.disabled = false;
     this.srcObject = null;
+    this.children = [];
+    this.open = false;
   }
 
   addEventListener(type, callback) {
@@ -27,8 +29,29 @@ class FakeElement {
     return this.attributes.get(name) ?? null;
   }
 
-  dispatch(type) {
-    return this.listeners.get(type)?.({ currentTarget: this, target: this });
+  dispatch(type, extra = {}) {
+    return this.listeners.get(type)?.({ currentTarget: this, target: this, ...extra });
+  }
+
+  focus() {
+    globalThis.document.activeElement = this;
+  }
+
+  showModal() {
+    this.open = true;
+  }
+
+  close() {
+    this.open = false;
+    this.dispatch('close');
+  }
+
+  append(...children) {
+    this.children.push(...children);
+  }
+
+  replaceChildren(...children) {
+    this.children = children;
   }
 }
 
@@ -82,7 +105,7 @@ test('client controller renders deck settings and progress without requesting ca
     getElementById: (id) => elements.get(id) ?? null,
     addEventListener() {},
   });
-  setGlobal('window', { addEventListener() {} });
+  setGlobal('window', { addEventListener() {}, location: { protocol: 'http:', host: '127.0.0.1:5173' } });
   let cameraRequests = 0;
   const cameraConstraints = [];
   let rejectPendingCameraRequest;
@@ -146,6 +169,48 @@ test('client controller renders deck settings and progress without requesting ca
     assert.equal(elements.get('reverse-mapping').textContent, 'Reverse swipes: off');
     assert.equal(elements.get('left-gesture-result').textContent, 'Next slide');
     assert.equal(elements.get('right-gesture-result').textContent, 'Previous');
+
+    class RemoteSocket {
+      static OPEN = 1;
+      constructor(url) { this.url = url; this.readyState = 0; this.sent = []; RemoteSocket.instance = this; }
+      send(value) { this.sent.push(JSON.parse(value)); }
+      open() { this.readyState = 1; this.onopen(); }
+      message(value) { this.onmessage({ data: JSON.stringify(value) }); }
+      close() { this.readyState = 3; this.onclose(); }
+    }
+    app.connectMobileRemote({ hostCredential: 'test-host', WebSocketImpl: RemoteSocket });
+    const socket = RemoteSocket.instance;
+    assert.equal(cameraRequests, 0);
+    socket.open();
+    socket.message({ type: 'presenterReady' });
+    assert.deepEqual(socket.sent.slice(0, 2), [
+      { type: 'presenter', credential: 'test-host' },
+      { type: 'state', index: 0, total: 4, busy: false },
+    ]);
+    socket.message({ type: 'command', id: 'remote-next', action: 'next' });
+    assert.equal(elements.get('slide-number').textContent, '02');
+    assert.deepEqual(socket.sent.at(-1), { type: 'commandAck', id: 'remote-next', accepted: true });
+    socket.message({ type: 'command', id: 'remote-go', action: 'goTo', index: 3 });
+    assert.equal(elements.get('slide-number').textContent, '04');
+    socket.message({ type: 'command', id: 'remote-last', action: 'next' });
+    assert.deepEqual(socket.sent.at(-1), { type: 'commandAck', id: 'remote-last', accepted: true });
+    socket.message({ type: 'command', id: 'remote-out', action: 'goTo', index: 4 });
+    assert.deepEqual(socket.sent.at(-1), { type: 'commandAck', id: 'remote-out', accepted: false });
+    assert.equal(cameraRequests, 0);
+    socket.message({ type: 'command', id: 'remote-middle', action: 'goTo', index: 2 });
+    const replacement = app.connectMobileRemote({ hostCredential: 'new-host', WebSocketImpl: RemoteSocket });
+    const replacementSocket = RemoteSocket.instance;
+    assert.notEqual(replacementSocket, socket);
+    assert.equal(socket.readyState, 3);
+    replacementSocket.open();
+    replacementSocket.message({ type: 'presenterReady' });
+    assert.deepEqual(replacementSocket.sent.slice(0, 2), [
+      { type: 'presenter', credential: 'new-host' },
+      { type: 'state', index: 2, total: 4, busy: false },
+    ]);
+    assert.equal(cameraRequests, 0);
+    replacementSocket.message({ type: 'command', id: 'remote-start', action: 'goTo', index: 0 });
+    replacement.close();
 
     elements.get('reverse-mapping').dispatch('click');
     assert.equal(elements.get('reverse-mapping').getAttribute('aria-pressed'), 'true');
@@ -264,4 +329,173 @@ test('live camera preview has a state-neutral accessible name', async () => {
 test('preview toggle starts hidden and disabled until a live camera is active', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(html, /id="preview-toggle"[^>]*aria-pressed="false" hidden disabled/);
+});
+
+test('presenter pairing stays camera independent and follows authenticated host lifecycle', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const appSource = await readFile(new URL('../app.js', import.meta.url), 'utf8');
+  const deckActionsStart = html.indexOf('<div class="deck-heading-actions">');
+  const deckActionsEnd = html.indexOf('</div>', deckActionsStart);
+  assert.ok(html.slice(deckActionsStart, deckActionsEnd).includes('id="connect-phone"'));
+  const sourceUi = appSource.slice(appSource.indexOf('function renderSourceUi()'), appSource.indexOf('async function renderPdfPage'));
+  assert.match(sourceUi, /show\(elements\.connectPhone, true\)/);
+  assert.match(sourceUi, /pdfActive \? 'PDF · Local file' : 'Browser · Sample deck'/);
+  assert.match(html, /<button id="connect-phone"[^>]*>Connect phone<\/button>/);
+  assert.doesNotMatch(html.match(/<button id="connect-phone"[^>]*>/)?.[0] ?? '', /hidden/);
+  assert.match(html, /<dialog id="pairing-dialog"[^>]*aria-labelledby="pairing-title"/);
+  assert.match(html, /<label[^>]*for="pairing-interface"[^>]*>Private network interface/);
+  assert.match(html, /<label[^>]*for="pairing-url"[^>]*>Pairing URL/);
+  for (const label of ['Start phone connection', 'Copy pairing URL', 'New pairing link', 'Disconnect phone', 'Close']) {
+    assert.match(html, new RegExp(`>${label.replace(/[.*+?^${}()|[\\]\\]/g, '\\\\$&')}<`));
+  }
+
+  const ids = [
+    'connect-phone', 'pairing-dialog', 'pairing-interface', 'start-phone-remote',
+    'pairing-qr-panel', 'pairing-qr', 'pairing-url-panel', 'pairing-url',
+    'copy-pairing-url', 'pairing-status', 'new-pairing-link', 'disconnect-phone',
+    'close-pairing-dialog', 'camera-preview', 'slide-number', 'slide-count', 'deck-progress',
+    'deck-visual', 'sample-canvas-topline', 'sample-canvas-content', 'sample-canvas-footer',
+  ];
+  const elements = new Map(ids.map((id) => [id, new FakeElement()]));
+  elements.get('start-phone-remote').disabled = true;
+  const body = new FakeElement();
+  const originalGlobals = new Map();
+  const setGlobal = (name, value) => {
+    originalGlobals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+  };
+  const documentListeners = new Map();
+  const windowListeners = new Map();
+  const fakeDocument = {
+    body,
+    activeElement: null,
+    visibilityState: 'visible',
+    hasFocus: () => true,
+    getElementById: (id) => elements.get(id) ?? null,
+    createElement: () => new FakeElement(),
+    addEventListener: (type, callback) => documentListeners.set(type, callback),
+  };
+  setGlobal('document', fakeDocument);
+  setGlobal('window', {
+    addEventListener: (type, callback) => windowListeners.set(type, callback),
+    location: { protocol: 'http:', host: '127.0.0.1:5173' },
+  });
+  let cameraRequests = 0;
+  setGlobal('navigator', {
+    mediaDevices: { getUserMedia: async () => { cameraRequests += 1; throw new Error('Camera should remain off.'); } },
+    clipboard: { writeText: async () => {} },
+  });
+  setGlobal('localStorage', { getItem: () => '{}', setItem() {}, removeItem() {} });
+
+  const calls = [];
+  let startCount = 0;
+  setGlobal('fetch', async (url, options = {}) => {
+    const call = { url, options, body: options.body ? JSON.parse(options.body) : undefined };
+    calls.push(call);
+    if (url === '/api/mobile-remote/interfaces') {
+      return { ok: true, json: async () => ({ interfaces: ['192.168.1.20', '10.0.0.4'] }) };
+    }
+    if (url === '/api/mobile-remote/start') {
+      startCount += 1;
+      return { ok: true, json: async () => ({
+        qrDataUrl: `data:image/png;base64,qr-${startCount}`,
+        fallbackUrl: `http://192.168.1.20:43123/remote#invite-${startCount}`,
+        hostCredential: 'host-secret',
+      }) };
+    }
+    if (url === '/api/mobile-remote/renew-invite') {
+      return { ok: true, json: async () => ({
+        qrDataUrl: 'data:image/png;base64,renewed',
+        fallbackUrl: 'http://192.168.1.20:43123/remote#renewed',
+      }) };
+    }
+    if (url === '/api/mobile-remote/stop') return { ok: true, json: async () => ({ stopped: true }) };
+    throw new Error(`Unexpected fetch ${url}`);
+  });
+
+  class RemoteSocket {
+    static OPEN = 1;
+    constructor(url) { this.url = url; this.readyState = 0; this.sent = []; RemoteSocket.instance = this; }
+    send(value) { this.sent.push(JSON.parse(value)); }
+    open() { this.readyState = 1; this.onopen(); }
+    message(value) { this.onmessage({ data: JSON.stringify(value) }); }
+    close() { this.readyState = 3; this.onclose(); }
+  }
+  setGlobal('WebSocket', RemoteSocket);
+  try {
+    const app = await import(`../app.js?pairing-test=${Date.now()}`);
+    const connectButton = elements.get('connect-phone');
+    assert.equal(connectButton.hidden, false, 'Connect phone is visible with the sample deck');
+    connectButton.focus();
+    await connectButton.dispatch('click');
+    assert.equal(elements.get('pairing-dialog').open, true);
+    assert.equal(fakeDocument.activeElement, elements.get('pairing-interface'));
+    assert.deepEqual(calls.map(({ url }) => url), ['/api/mobile-remote/interfaces']);
+    assert.deepEqual(elements.get('pairing-interface').children.map(({ value }) => value), ['', '192.168.1.20', '10.0.0.4']);
+    assert.equal(cameraRequests, 0);
+    assert.equal(calls.some(({ url }) => url.endsWith('/start')), false);
+
+    elements.get('pairing-interface').value = '192.168.1.20';
+    elements.get('pairing-interface').dispatch('change');
+    assert.equal(elements.get('start-phone-remote').disabled, false);
+    await elements.get('start-phone-remote').dispatch('click');
+    const startCall = calls.find(({ url }) => url === '/api/mobile-remote/start');
+    assert.deepEqual(startCall.body, { address: '192.168.1.20', state: { index: 0, total: 4, busy: false } });
+    assert.equal(elements.get('pairing-qr-panel').hidden, true);
+    assert.equal(elements.get('pairing-url-panel').hidden, true);
+    assert.equal(elements.get('pairing-qr').src, '');
+    assert.equal(elements.get('pairing-url').value, '');
+    assert.equal(cameraRequests, 0);
+
+    const socket = RemoteSocket.instance;
+    socket.open();
+    socket.message({ type: 'presenterReady' });
+    assert.equal(elements.get('pairing-qr-panel').hidden, false);
+    assert.equal(elements.get('pairing-qr').src, 'data:image/png;base64,qr-1');
+    assert.equal(elements.get('pairing-url-panel').hidden, false);
+    assert.equal(elements.get('pairing-url').value, 'http://192.168.1.20:43123/remote#invite-1');
+    socket.message({ type: 'inviteExpired' });
+    assert.equal(elements.get('new-pairing-link').hidden, false);
+    assert.equal(elements.get('pairing-qr-panel').hidden, true);
+    await elements.get('new-pairing-link').dispatch('click');
+    assert.ok(calls.some(({ url, body }) => url === '/api/mobile-remote/renew-invite' && body && Object.keys(body).length === 0));
+    assert.equal(elements.get('pairing-qr').src, 'data:image/png;base64,renewed');
+    assert.equal(elements.get('pairing-url').value, 'http://192.168.1.20:43123/remote#renewed');
+    assert.equal(elements.get('pairing-qr-panel').hidden, false);
+    assert.equal(elements.get('pairing-url-panel').hidden, false);
+
+    socket.message({ type: 'phonePaired' });
+    assert.match(elements.get('pairing-status').textContent, /Phone connected/);
+    await elements.get('disconnect-phone').dispatch('click');
+    assert.ok(calls.some(({ url, body }) => url === '/api/mobile-remote/stop' && body && Object.keys(body).length === 0));
+    assert.equal(socket.readyState, 3);
+    assert.equal(elements.get('pairing-status').textContent, 'Disconnected');
+    assert.equal(elements.get('pairing-qr-panel').hidden, true);
+    assert.equal(elements.get('pairing-url-panel').hidden, true);
+    assert.equal(elements.get('pairing-url').value, '');
+    assert.equal(elements.get('new-pairing-link').hidden, true);
+    assert.equal(elements.get('disconnect-phone').hidden, true);
+    assert.equal(cameraRequests, 0);
+
+    await elements.get('close-pairing-dialog').dispatch('click');
+    assert.equal(elements.get('pairing-dialog').open, false);
+    assert.equal(fakeDocument.activeElement, connectButton);
+    connectButton.focus();
+    await connectButton.dispatch('click');
+    elements.get('pairing-interface').value = '10.0.0.4';
+    elements.get('pairing-interface').dispatch('change');
+    await elements.get('start-phone-remote').dispatch('click');
+    const pagehideSocket = RemoteSocket.instance;
+    await windowListeners.get('pagehide')();
+    assert.equal(calls.filter(({ url }) => url === '/api/mobile-remote/stop').length, 2);
+    assert.equal(pagehideSocket.readyState, 3);
+    assert.equal(elements.get('pairing-url').value, '');
+    assert.equal(elements.get('pairing-status').textContent, 'Disconnected');
+    assert.equal(cameraRequests, 0);
+  } finally {
+    for (const [name, descriptor] of originalGlobals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else delete globalThis[name];
+    }
+  }
 });

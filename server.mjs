@@ -3,6 +3,7 @@ import { createReadStream } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { attachMobileRemote, isLocalPresenterHost, listPrivateInterfaces } from './src/mobile-remote-server.js';
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 const publicRootFiles = new Set(['index.html', 'app.js', 'styles.css', 'favicon.svg']);
@@ -46,16 +47,17 @@ function isPublicPath(relativePath) {
 }
 
 export function resolveListenHost(hostOverride) {
-  const host = hostOverride || '127.0.0.1';
-  if (host !== '127.0.0.1') {
-    throw new TypeError('GestureDeck development server supports loopback only (127.0.0.1).');
+  const host = hostOverride || '0.0.0.0';
+  if (host !== '127.0.0.1' && host !== '0.0.0.0') {
+    throw new TypeError('GestureDeck development server must bind to 127.0.0.1 or 0.0.0.0.');
   }
   return host;
 }
 
-export function createAppServer({ root = projectRoot, host = '127.0.0.1' } = {}) {
+export function createAppServer({ root = projectRoot, host = '0.0.0.0' } = {}) {
+  resolveListenHost(host);
   const resolvedRoot = path.resolve(root);
-  return http.createServer(async (request, response) => {
+  const server = http.createServer(async (request, response) => {
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       sendText(response, 405, 'Method not allowed');
       return;
@@ -111,7 +113,7 @@ export function createAppServer({ root = projectRoot, host = '127.0.0.1' } = {})
         'cross-origin-opener-policy': 'same-origin',
         'cross-origin-embedder-policy': 'require-corp',
         'cross-origin-resource-policy': 'same-origin',
-        'content-security-policy': "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+        'content-security-policy': `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self' ws://${isLocalPresenterHost(request.headers.host, server.address()?.port) ? request.headers.host : `127.0.0.1:${server.address()?.port}`}/ws/mobile-remote/presenter; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'`,
       });
       if (request.method === 'HEAD') {
         response.end();
@@ -127,6 +129,8 @@ export function createAppServer({ root = projectRoot, host = '127.0.0.1' } = {})
       sendText(response, 500, 'Internal server error');
     }
   });
+  server.mobileRemote = attachMobileRemote(server, { root: resolvedRoot });
+  return server;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -134,10 +138,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const port = Number(process.env.PORT ?? 5173);
   const server = createAppServer({ host });
   server.listen(port, host, () => {
-    console.log(`GestureDeck ready at http://${host}:${port}`);
+    const presenterUrls = ['127.0.0.1', ...listPrivateInterfaces()].map((address) => `http://${address}:${port}`);
+    console.log(`GestureDeck listening on ${host}:${port}; open on the presenter computer: ${presenterUrls.join(' or ')}`);
   });
 
   for (const signal of ['SIGINT', 'SIGTERM']) {
-    process.on(signal, () => server.close(() => process.exit(0)));
+    process.on(signal, async () => {
+      await server.mobileRemote.close();
+      server.close(() => process.exit(0));
+    });
   }
 }

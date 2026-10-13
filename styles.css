@@ -527,6 +527,169 @@ h1 {
   }
 }
 
+.pairing-dialog:not([open]) {
+  display: none;
+}
+
+.pairing-dialog[open] {
+  display: grid;
+  width: min(540px, calc(100vw - 28px));
+  max-width: none;
+  max-height: min(88vh, 760px);
+  gap: 18px;
+  overflow: auto;
+  margin: auto;
+  padding: clamp(21px, 4vw, 30px);
+  border: 1px solid var(--line-strong);
+  border-radius: 18px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 24px 72px rgb(29 32 27 / 22%);
+}
+
+.pairing-dialog::backdrop {
+  background: rgb(24 28 23 / 44%);
+  backdrop-filter: blur(3px);
+}
+
+.pairing-dialog-header,
+.pairing-url-row,
+.pairing-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.pairing-dialog-header h2 {
+  margin: 0;
+  font-size: clamp(22px, 5vw, 27px);
+  letter-spacing: -0.04em;
+  line-height: 1.2;
+}
+
+.pairing-dialog-header .eyebrow {
+  margin: 0 0 5px;
+}
+
+.pairing-close {
+  min-height: 40px;
+}
+
+.pairing-description,
+.pairing-help {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.pairing-interface-row,
+.pairing-url-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.pairing-interface-row label,
+.pairing-url-panel label {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pairing-dialog select,
+.pairing-dialog input {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 9px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  color: var(--ink);
+  background: #fffefa;
+  font: inherit;
+  font-size: 13px;
+}
+
+.pairing-dialog select:focus-visible,
+.pairing-dialog input:focus-visible,
+.pairing-dialog button:focus-visible {
+  outline: 3px solid #315c85;
+  outline-offset: 3px;
+}
+
+.pairing-interface-row .button {
+  justify-self: start;
+}
+
+.pairing-status {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 9px;
+  color: #4c5946;
+  background: #eef1e8;
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.pairing-qr-panel {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  margin: 0;
+  text-align: center;
+}
+
+.pairing-qr-panel img {
+  display: block;
+  width: min(220px, 65vw);
+  aspect-ratio: 1;
+  object-fit: contain;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: white;
+}
+
+.pairing-qr-panel figcaption {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pairing-url-row input {
+  flex: 1 1 auto;
+}
+
+.pairing-url-row .button {
+  flex: 0 0 auto;
+}
+
+.pairing-dialog-actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 460px) {
+  .pairing-dialog[open] {
+    width: calc(100vw - 20px);
+    max-height: 92vh;
+    gap: 15px;
+    padding: 18px;
+  }
+
+  .pairing-dialog-header {
+    align-items: flex-start;
+  }
+
+  .pairing-url-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .pairing-url-row .button,
+  .pairing-dialog-actions .button {
+    width: 100%;
+  }
+}
+
 .canvas-topline,
 .canvas-footer {
   display: flex;

@@ -7,10 +7,11 @@ import { createAppServer, resolveListenHost } from '../server.mjs';
 
 const scratch = process.env.TMPDIR ?? '/home/dei/.hermes/cache/scratch';
 
-test('development server only accepts its explicit loopback bind address', () => {
-  assert.equal(resolveListenHost(undefined), '127.0.0.1');
+test('development server accepts loopback or all-interface bind addresses', () => {
+  assert.equal(resolveListenHost(undefined), '0.0.0.0');
   assert.equal(resolveListenHost('127.0.0.1'), '127.0.0.1');
-  assert.throws(() => resolveListenHost('0.0.0.0'), /loopback only/);
+  assert.equal(resolveListenHost('0.0.0.0'), '0.0.0.0');
+  assert.throws(() => resolveListenHost('192.168.1.2'), /127\.0\.0\.1 or 0\.0\.0\.0/);
 });
 
 test('served app shell loads the client controller module', async () => {
@@ -147,4 +148,11 @@ test('development server rejects methods other than GET and HEAD', async () => {
     await once(server, 'close');
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('app server attaches the mobile remote controller and accepts all-interface binding', () => {
+  const server = createAppServer();
+  assert.equal(typeof server.mobileRemote.stop, 'function');
+  assert.equal(typeof server.mobileRemote.close, 'function');
+  assert.doesNotThrow(() => createAppServer({ host: '0.0.0.0' }));
 });

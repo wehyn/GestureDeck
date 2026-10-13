@@ -25,7 +25,7 @@ Hand tracking needs a continuous camera feed and timely feedback during a presen
 
 ## What runs locally
 
-- A Node.js development server bound to `127.0.0.1` (loopback only).
+- A Node.js development server bound to `0.0.0.0` (all network interfaces).
 - Camera capture, after you explicitly start setup or a session.
 - MediaPipe hand-landmark inference and swipe recognition in the browser, using the model and WebAssembly runtime served from local project files.
 - The sample slide deck, imported PDF rendering, hand-skeleton preview, and gesture settings. Settings are saved in this browser on this device; imported PDFs are kept only in memory for the current page session.
@@ -51,7 +51,7 @@ Model source: [MediaPipe Hand Landmarker float16 model](https://storage.googleap
 ## Technologies and frameworks
 
 - HTML, CSS, and vanilla JavaScript ES modules for the interface and client logic (no frontend framework).
-- Node.js 20+ and its built-in HTTP server for loopback-only local serving.
+- Node.js 20+ and its built-in HTTP server for local-network serving.
 - MediaPipe Tasks Vision 0.10.33 and WebAssembly for local hand tracking.
 - PDF.js (`pdfjs-dist` 4.10.38) for local PDF page rendering.
 - Browser APIs including `getUserMedia`, canvas, and `localStorage`.
@@ -60,7 +60,7 @@ Model source: [MediaPipe Hand Landmarker float16 model](https://storage.googleap
 ## APIs and cloud services
 
 - **Runtime browser APIs:** `getUserMedia` for camera capture, Canvas for preview and PDF pages, the Fullscreen API for presenting, and `localStorage` for gesture settings.
-- **Runtime cloud services and hosted AI APIs:** None. Hand inference, swipe recognition, and PDF rendering run on the device. The app's HTTP server listens on `127.0.0.1` and serves local project files.
+- **Runtime cloud services and hosted AI APIs:** None. Hand inference, swipe recognition, and PDF rendering run on the device. The app's HTTP server listens on all interfaces and serves local project files.
 - **Services used outside the running app:** GitHub hosts this public repository; npm may be needed to download dependencies during installation. YouTube hosts the demo video and LinkedIn hosts the video post; viewing them requires internet access.
 
 ## Existing code and assets
@@ -87,6 +87,21 @@ npm run dev
 Open `http://127.0.0.1:5173`.
 
 To show your own presentation, click **Open PDF** and choose an unprotected `.pdf` file. Each page becomes a slide. Click **Present fullscreen** to fill the browser display; browsers require this click before entering fullscreen. The Previous/Next/Exit controls appear when you move the pointer or focus them, then fade while idle. The left/right arrow keys and the same swipe gestures after starting a session also navigate pages. Press Escape or click **Exit fullscreen** to return to the workspace, or click **Back to sample deck** to return to the built-in example. Password-protected PDFs are not supported in this version. GestureDeck does not upload or store the PDF.
+
+## Use GestureDeck from your phone
+
+The mobile remote controls the active sample deck or imported PDF from a phone browser on the same local network.
+
+1. Start GestureDeck and open it on the presenter computer at `http://localhost:5173` (or `http://127.0.0.1:5173`) so the browser can grant camera access. Plain HTTP on a LAN or Tailscale IP cannot access the camera.
+2. Connect both devices to the same trusted Wi-Fi network or Tailscale network.
+3. Choose **Connect phone**, select the private network interface used by the phone, and start the connection.
+4. Scan the QR code or copy the fallback URL to the phone. The pairing link expires after two minutes and can be renewed from the presenter dialog.
+5. Use **Previous**, **Next**, or the numbered slide picker. If Wi-Fi briefly drops, the phone reconnects and restores the current slide position.
+6. Choose **Disconnect** on the phone or **Disconnect phone** in the presenter dialog to end the remote session.
+
+The main GestureDeck server binds to `0.0.0.0`; open it over loopback on the presenter computer for camera access. The QR code or fallback URL uses the selected Wi-Fi or Tailscale address for the phone. The presenter controls stay restricted to connections from that computer. Only while a remote session is active, a separate temporary listener binds to the selected Wi-Fi or Tailscale IPv4 interface and serves the phone controls. It closes when the presenter stops the remote or closes the page. Pair only on a trusted network: local HTTP and WebSocket control traffic is unencrypted outside the Tailscale tunnel.
+
+The phone receives only the slide index, slide count, busy state, and navigation commands. It does not download slide content, PDF bytes, filenames, rendered pages, or camera data. The remote needs no internet connection, account, phone app, camera permission, PDF upload, slide transfer, or hosted QR service.
 
 ## Current prototype boundary
 
