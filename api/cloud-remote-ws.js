@@ -5,6 +5,6 @@ import { attachRedisCloudRemote } from '../src/cloud-remote-redis-server.js';
 // WebSocket upgrades to the HTTP API route causes Vercel to close the upgraded
 // socket with a 404 after the handshake.
 const server = createServer();
-attachRedisCloudRemote(server);
+attachRedisCloudRemote(server, { webSocketFunctionPath: '/api/cloud-remote-ws' });
 
 export default server;

@@ -133,11 +133,21 @@ function sameOrigin(request) {
   } catch { return false; }
 }
 
-function sessionIdFromTarget(target, route) {
+function sessionIdFromTarget(target, route, webSocketFunctionPath) {
   try {
     const parsed = new URL(target, 'http://gesturedeck.invalid');
-    if (parsed.pathname !== route || [...parsed.searchParams.keys()].some((key) => key !== 'session')) return null;
+    const channel = parsed.pathname === webSocketFunctionPath
+      ? parsed.searchParams.get(FUNCTION_ROUTE_QUERY)
+      : null;
+    const requestRoute = channel === 'presenter' ? '/ws/cloud-remote/presenter'
+      : channel === 'phone' ? '/ws/cloud-remote/phone'
+        : parsed.pathname;
+    const allowedParameters = parsed.pathname === webSocketFunctionPath
+      ? ['session', FUNCTION_ROUTE_QUERY]
+      : ['session'];
+    if (requestRoute !== route || [...parsed.searchParams.keys()].some((key) => !allowedParameters.includes(key))) return null;
     if (parsed.searchParams.getAll('session').length !== 1) return null;
+    if (parsed.pathname === webSocketFunctionPath && parsed.searchParams.getAll(FUNCTION_ROUTE_QUERY).length !== 1) return null;
     const id = parsed.searchParams.get('session');
     return SESSION_ID_PATTERN.test(id ?? '') ? id : null;
   } catch { return null; }
@@ -231,7 +241,7 @@ function attachCloudWebSocketServer(server, { path, verifyRequest, onConnection 
   };
 }
 
-export function attachRedisCloudRemote(server, { redis = makeRedis() } = {}) {
+export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketFunctionPath } = {}) {
   const sockets = new Set();
 
   function normalizeFunctionRoute(request) {
@@ -250,25 +260,52 @@ export function attachRedisCloudRemote(server, { redis = makeRedis() } = {}) {
     if (path) request.url = `${path}${target.search}`;
   }
 
-  server.prependListener('upgrade', normalizeFunctionRoute);
+  if (!webSocketFunctionPath) server.prependListener('upgrade', normalizeFunctionRoute);
   const wsOptions = {
-    maxPayloadBytes: MAX_BODY_BYTES,
     verifyRequest(request, route) {
-      return Boolean(redis && sameOrigin(request) && sessionIdFromTarget(request.url ?? '', route));
+      return Boolean(redis && sameOrigin(request)
+        && sessionIdFromTarget(request.url ?? '', route, webSocketFunctionPath));
     },
   };
 
-  const detachPresenter = attachCloudWebSocketServer(server, {
-    path: '/ws/cloud-remote/presenter',
-    verifyRequest: (request) => wsOptions.verifyRequest(request, '/ws/cloud-remote/presenter'),
-    onConnection(socket, request) { sockets.add(socket); void handlePresenter(socket, request); },
-  });
+  function onRemoteConnection(socket, request, route) {
+    sockets.add(socket);
+    if (route === '/ws/cloud-remote/presenter') void handlePresenter(socket, request);
+    else void handlePhone(socket, request);
+  }
 
-  const detachPhone = attachCloudWebSocketServer(server, {
-    path: '/ws/cloud-remote/phone',
-    verifyRequest: (request) => wsOptions.verifyRequest(request, '/ws/cloud-remote/phone'),
-    onConnection(socket, request) { sockets.add(socket); void handlePhone(socket, request); },
-  });
+  let detachPresenter;
+  let detachPhone;
+  if (webSocketFunctionPath) {
+    detachPresenter = attachCloudWebSocketServer(server, {
+      path: webSocketFunctionPath,
+      verifyRequest(request) {
+        return wsOptions.verifyRequest(request, '/ws/cloud-remote/presenter')
+          || wsOptions.verifyRequest(request, '/ws/cloud-remote/phone');
+      },
+      onConnection(socket, request) {
+        let route = '';
+        try {
+          const target = new URL(request.url ?? '/', 'http://gesturedeck.invalid');
+          route = target.searchParams.get(FUNCTION_ROUTE_QUERY) === 'presenter'
+            ? '/ws/cloud-remote/presenter'
+            : '/ws/cloud-remote/phone';
+        } catch { socket.close(1008, 'Invalid route'); return; }
+        onRemoteConnection(socket, request, route);
+      },
+    });
+  } else {
+    detachPresenter = attachCloudWebSocketServer(server, {
+      path: '/ws/cloud-remote/presenter',
+      verifyRequest: (request) => wsOptions.verifyRequest(request, '/ws/cloud-remote/presenter'),
+      onConnection(socket, request) { onRemoteConnection(socket, request, '/ws/cloud-remote/presenter'); },
+    });
+    detachPhone = attachCloudWebSocketServer(server, {
+      path: '/ws/cloud-remote/phone',
+      verifyRequest: (request) => wsOptions.verifyRequest(request, '/ws/cloud-remote/phone'),
+      onConnection(socket, request) { onRemoteConnection(socket, request, '/ws/cloud-remote/phone'); },
+    });
+  }
 
   async function handlePresenter(socket, request) {
     const id = sessionIdFromTarget(request.url ?? '', '/ws/cloud-remote/presenter');
@@ -567,10 +604,10 @@ export function attachRedisCloudRemote(server, { redis = makeRedis() } = {}) {
       for (const socket of sockets) {
         try { socket.close(1001, 'Server shutting down'); } catch { socket.destroy?.(); }
       }
-      detachPhone();
-      detachPresenter();
+      detachPhone?.();
+      detachPresenter?.();
       server.off('request', requestListener);
-      server.off('upgrade', normalizeFunctionRoute);
+      if (!webSocketFunctionPath) server.off('upgrade', normalizeFunctionRoute);
       for (const listener of previousListeners) server.on('request', listener);
     },
   };
