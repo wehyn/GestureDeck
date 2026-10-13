@@ -9,9 +9,20 @@ import { createMobileRemoteClient } from './src/mobile-remote-client.js';
 import { SwipeRecognizer } from './src/gesture-engine.js';
 
 const $ = (id) => document.getElementById(id);
+function isLocalNetworkHost(hostname) {
+  const host = String(hostname ?? '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host === '::1') return true;
+  const parts = host.split('.');
+  if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/.test(part) || Number(part) > 255)) return false;
+  const [first, second] = parts.map(Number);
+  return first === 10 || first === 127 || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 168) || (first === 100 && second >= 64 && second <= 127);
+}
+
+const cloudExperience = new URLSearchParams(globalThis.location?.search ?? '').get('experience') === 'cloud'
+  && !isLocalNetworkHost(globalThis.location?.hostname);
 const elements = {
   startSetup: $('start-setup'),
-  compactStartSetup: $('compact-start-setup'),
   startSession: $('start-session'),
   pauseSession: $('pause-session'),
   resumeSession: $('resume-session'),
@@ -19,6 +30,8 @@ const elements = {
   previousSlide: $('previous-slide'),
   nextSlide: $('next-slide'),
   cameraPreview: $('camera-preview'),
+  cameraCard: $('camera-card'),
+  statusList: $('status-list'),
   handOverlay: $('hand-overlay'),
   cameraDiagnostics: $('camera-diagnostics'),
   diagnosticStatusDot: $('diagnostic-status-dot'),
@@ -41,6 +54,7 @@ const elements = {
   cameraStatusBadge: $('camera-status-badge'),
   handStatus: $('hand-status'),
   sessionMessage: $('session-message'),
+  setupHint: $('setup-hint'),
   errorMessage: $('error-message'),
   slideNumber: $('slide-number'),
   slideCount: $('slide-count'),
@@ -65,6 +79,7 @@ const elements = {
   openPdf: $('open-pdf'),
   pdfFile: $('pdf-file'),
   sampleDeck: $('sample-deck'),
+  sampleDeckStatus: $('sample-deck-status'),
   enterPdfFullscreen: $('enter-pdf-fullscreen'),
   pdfFullscreenToolbar: $('pdf-fullscreen-toolbar'),
   fullscreenPrevious: $('fullscreen-previous'),
@@ -136,6 +151,7 @@ let remoteStarting = false;
 let remoteAuthenticated = false;
 let remoteGeneration = 0;
 let remoteStopPromise = null;
+let cloudRemoteSession = null;
 let closingMobileRemote = false;
 let pageIsHiding = false;
 const savedSettings = loadSettings();
@@ -239,11 +255,14 @@ function setMode(mode, message) {
   })[mode] ?? 'IDLE');
   const isIdle = mode === 'idle' || mode === 'error';
   show(elements.startSetup, isIdle);
-  show(elements.compactStartSetup, isIdle);
   show(elements.startSession, mode === 'setup');
   show(elements.pauseSession, mode === 'live');
   show(elements.resumeSession, mode === 'paused');
   show(elements.stopSession, ['starting', 'setup', 'live', 'paused'].includes(mode));
+  show(elements.cameraCard, mode !== 'idle');
+  show(elements.statusList, mode !== 'idle');
+  show(elements.sessionMessage, mode !== 'idle');
+  show(elements.setupHint, mode === 'idle');
   show(elements.cameraPicker, state.cameraChoicesAvailable && ['setup', 'error'].includes(mode));
   if (elements.startSession) elements.startSession.disabled = state.setupGestures.size < 2;
 
@@ -264,17 +283,17 @@ export function renderCameraState(cameraState) {
   if (cameraState === 'active') {
     setText(elements.cameraStatus, 'Camera on · Local processing');
     setText(elements.cameraStatusDetail, 'On · local only');
-    setText(elements.cameraStatusCopy, 'Frames stay on this device. No video is saved or uploaded.');
+    setText(elements.cameraStatusCopy, 'On-device only.');
     setText(elements.cameraStatusBadge, 'ON');
   } else if (cameraState === 'starting') {
     setText(elements.cameraStatus, 'Requesting camera access…');
     setText(elements.cameraStatusDetail, 'Starting');
-    setText(elements.cameraStatusCopy, 'Waiting for camera permission.');
+    setText(elements.cameraStatusCopy, 'Waiting for permission.');
     setText(elements.cameraStatusBadge, 'WAIT');
   } else {
     setText(elements.cameraStatus, 'Camera off');
+    setText(elements.cameraStatusCopy, 'Starts when you begin setup.');
     setText(elements.cameraStatusDetail, 'Off');
-    setText(elements.cameraStatusCopy, 'Nothing is being captured.');
     setText(elements.cameraStatusBadge, 'OFF');
   }
 }
@@ -461,9 +480,12 @@ function renderSourceUi() {
   show(elements.sampleCanvasContent, !pdfActive);
   show(elements.sampleCanvasFooter, !pdfActive);
   show(elements.pdfStage, pdfActive);
-  show(elements.sampleDeck, pdfActive);
+  show(elements.sampleDeck, true);
+  elements.sampleDeck?.setAttribute('aria-pressed', String(!pdfActive));
+  if (elements.sampleDeck) elements.sampleDeck.dataset.selected = String(!pdfActive);
+  setText(elements.sampleDeckStatus, pdfActive ? 'Use sample deck' : 'Selected');
   show(elements.enterPdfFullscreen, pdfActive);
-  setText(elements.deckHeading, pdfActive ? state.pdfName : 'Field notes on presence');
+  setText(elements.deckHeading, pdfActive ? state.pdfName : cloudExperience ? 'Sample deck' : 'Field notes on presence');
   setText(elements.deckEyebrow, pdfActive ? 'YOUR PDF' : 'SAMPLE DECK');
   setText(elements.deckFormatLabel, pdfActive ? 'PDF · Local file' : 'Browser · Sample deck');
   setText(elements.targetStatus, pdfActive ? 'Imported PDF · browser demo' : 'Sample deck · browser demo');
@@ -600,10 +622,10 @@ function handleRemoteCommand(command) {
 }
 
 /** Connect after /api/mobile-remote/start returns its hostCredential. */
-export function connectMobileRemote({ hostCredential, WebSocketImpl, onConnection } = {}) {
+export function connectMobileRemote({ hostCredential, WebSocketImpl, onConnection, path } = {}) {
   mobileRemoteClient?.close();
   mobileRemoteClient = createMobileRemoteClient({
-    hostCredential, WebSocketImpl, onConnection,
+    hostCredential, WebSocketImpl, onConnection, path,
     onCommand: handleRemoteCommand,
     location: window.location,
   });
@@ -626,13 +648,28 @@ async function requestMobileRemote(path, { method = 'GET', body, keepalive = fal
   return payload;
 }
 
+async function requestCloudRemote(path, { method = 'POST', body, keepalive = false } = {}) {
+  const options = { method, headers: {} };
+  if (body !== undefined) {
+    options.headers['content-type'] = 'application/json';
+    options.body = JSON.stringify(body);
+  }
+  if (keepalive) options.keepalive = true;
+  const response = await fetch(`/api/cloud-remote/${path}`, options);
+  let payload = {};
+  try { payload = await response.json(); } catch { /* Report a stable fallback below. */ }
+  if (!response.ok) throw new Error(payload.error || `Request failed (${response.status || 'unknown'})`);
+  return payload;
+}
+
 function setPairingStatus(message) {
   setText(elements.pairingStatus, message);
 }
 
 function updatePairingStartButton() {
   if (elements.startPhoneRemote) {
-    elements.startPhoneRemote.disabled = remoteStarting || remoteActive || !elements.pairingInterface?.value;
+    elements.startPhoneRemote.disabled = remoteStarting || remoteActive
+      || (!cloudExperience && !elements.pairingInterface?.value);
   }
 }
 
@@ -712,6 +749,15 @@ function openPairingDialog() {
   if (!elements.pairingDialog) return;
   pairingReturnFocus = document.activeElement ?? elements.connectPhone;
   if (!elements.pairingDialog.open) elements.pairingDialog.showModal();
+  if (cloudExperience) {
+    setText($('pairing-dialog-eyebrow'), 'PHONE REMOTE');
+    setText($('pairing-title'), 'Connect your phone');
+    setText($('pairing-description'), 'Scan the code with your phone. Your PDF stays in this browser; the phone receives slide controls only.');
+    setText(elements.startPhoneRemote, 'Create pairing link');
+    void startCloudMobileRemote();
+    elements.pairingStatus?.focus?.({ preventScroll: true });
+    return;
+  }
   elements.pairingInterface?.focus?.({ preventScroll: true });
   return loadPairingInterfaces();
 }
@@ -752,6 +798,7 @@ function handleMobileRemoteConnection(event, generation) {
 }
 
 async function startMobileRemote() {
+  if (cloudExperience) return startCloudMobileRemote();
   if (remoteActive || remoteStarting) return;
   const address = elements.pairingInterface?.value;
   if (!address) {
@@ -811,13 +858,73 @@ async function startMobileRemote() {
   }
 }
 
+async function startCloudMobileRemote() {
+  if (!cloudExperience || remoteActive || remoteStarting) return;
+  const generation = ++remoteGeneration;
+  remoteStarting = true;
+  updatePairingStartButton();
+  show(elements.newPairingLink, false);
+  clearPairingMaterial();
+  setPairingStatus('Starting the phone connection…');
+  let startedSession;
+  try {
+    const result = await requestCloudRemote('start', { body: { state: remoteSnapshot() } });
+    if (typeof result.sessionId !== 'string' || !/^[A-Za-z0-9_-]{16}$/.test(result.sessionId)
+      || typeof result.hostCredential !== 'string' || !result.hostCredential) {
+      throw new Error('The pairing service returned incomplete connection details.');
+    }
+    startedSession = { sessionId: result.sessionId, hostCredential: result.hostCredential };
+    if (typeof result.qrDataUrl !== 'string' || typeof result.fallbackUrl !== 'string') {
+      throw new Error('The pairing service returned incomplete connection details.');
+    }
+    if (generation !== remoteGeneration) {
+      void requestCloudRemote('stop', { body: startedSession, keepalive: pageIsHiding }).catch(() => {});
+      return;
+    }
+    cloudRemoteSession = startedSession;
+    pendingPairingInvite = { qrDataUrl: result.qrDataUrl, fallbackUrl: result.fallbackUrl };
+    remoteStarting = false;
+    remoteActive = true;
+    show(elements.disconnectPhone, true);
+    updatePairingStartButton();
+    setPairingStatus('Waiting for the presenter connection…');
+    const path = `/ws/cloud-remote/presenter?session=${encodeURIComponent(result.sessionId)}`;
+    mobileRemoteClient = connectMobileRemote({
+      hostCredential: result.hostCredential,
+      path,
+      onConnection: (event) => handleMobileRemoteConnection(event, generation),
+    });
+  } catch (error) {
+    if (startedSession) {
+      void requestCloudRemote('stop', { body: startedSession, keepalive: pageIsHiding }).catch(() => {});
+    }
+    if (generation !== remoteGeneration) return;
+    remoteStarting = false;
+    remoteActive = false;
+    remoteAuthenticated = false;
+    cloudRemoteSession = null;
+    clearPairingMaterial();
+    show(elements.newPairingLink, false);
+    show(elements.disconnectPhone, false);
+    updatePairingStartButton();
+    const reason = error.message === 'https-required'
+      ? 'Open GestureDeck using its secure HTTPS link to connect your phone.'
+      : error.message === 'capacity-reached'
+        ? 'Phone sessions are busy right now. Try again in a little while.'
+        : error.message;
+    setPairingStatus(`Could not start the phone connection. ${reason}`);
+  }
+}
+
 async function renewPairingInvite() {
   if (!remoteActive || !remoteAuthenticated) return;
   show(elements.newPairingLink, false);
   setPairingStatus('Creating a new pairing link…');
   const generation = remoteGeneration;
   try {
-    const result = await requestMobileRemote('renew-invite', { method: 'POST', body: {} });
+    const result = cloudExperience
+      ? await requestCloudRemote('renew-invite', { body: cloudRemoteSession })
+      : await requestMobileRemote('renew-invite', { method: 'POST', body: {} });
     if (generation !== remoteGeneration || !remoteActive || !remoteAuthenticated) return;
     if (typeof result.qrDataUrl !== 'string' || typeof result.fallbackUrl !== 'string') {
       throw new Error('The pairing service returned an incomplete pairing link.');
@@ -844,7 +951,13 @@ async function stopMobileRemote({ keepalive = false, force = false } = {}) {
   if (elements.pairingInterface) elements.pairingInterface.disabled = false;
   resetPairingUi();
   if (!shouldPostStop) return;
-  remoteStopPromise = requestMobileRemote('stop', { method: 'POST', body: {}, keepalive })
+  const sessionToStop = cloudRemoteSession;
+  cloudRemoteSession = null;
+  remoteStopPromise = (cloudExperience
+    ? sessionToStop
+      ? requestCloudRemote('stop', { body: sessionToStop, keepalive })
+      : Promise.resolve()
+    : requestMobileRemote('stop', { method: 'POST', body: {}, keepalive }))
     .catch(() => {})
     .finally(() => { remoteStopPromise = null; });
   return remoteStopPromise;
@@ -1304,7 +1417,6 @@ function bindEvents() {
   elements.pdfFullscreenToolbar?.addEventListener('focusin', revealFullscreenToolbar);
   document.addEventListener('fullscreenchange', syncPdfFullscreen);
   elements.startSetup?.addEventListener('click', () => startCapture('setup'));
-  elements.compactStartSetup?.addEventListener('click', () => startCapture('setup'));
   elements.startSession?.addEventListener('click', () => {
     if (state.mode !== 'setup' || state.setupGestures.size < 2) return;
     state.previewVisible = defaultPreviewVisibility('live');
@@ -1381,6 +1493,15 @@ if (elements.reverseMapping) {
 }
 
 bindEvents();
+if (cloudExperience) {
+  document.documentElement.dataset.experience = 'cloud';
+  setText($('page-title'), 'Present with your phone.');
+  setText(document.querySelector('.welcome-description'), 'Choose a PDF, pair your phone, and present.');
+  setText(elements.connectPhone?.querySelector('.deck-choice-copy strong'), 'Connect phone');
+  setText(elements.connectPhone?.querySelector('.deck-choice-copy span'), 'Pair to this presentation');
+  setText($('pairing-dialog-eyebrow'), 'PHONE REMOTE');
+  setText(elements.startPhoneRemote, 'Create pairing link');
+}
 renderSlide();
 setMode('idle');
 renderGestureMapping();

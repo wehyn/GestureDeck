@@ -4,308 +4,84 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f5f3ed">
-    <meta name="description" content="A private, local-first gesture remote for your presentations.">
-    <title>GestureDeck — Your presenter workspace</title>
+    <meta name="description" content="Present a PDF from your browser and move through slides with your phone. Your presentation file stays on your device.">
+    <title>GestureDeck — The floor is yours</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="/home.css">
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to main content</a>
-
-    <div class="app-shell">
-      <header class="topbar">
-        <a class="brand" href="#main-content" aria-label="GestureDeck home">
-          <span class="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 32 32" focusable="false">
-              <path d="M7 8.5h18v15H7z" />
-              <path d="m12 19 4-5 4 5" />
-              <path d="M16 14v8" />
-            </svg>
-          </span>
-          <span class="brand-name">Gesture<span>Deck</span></span>
+    <div class="page-shell">
+      <header class="site-header">
+        <a class="brand" href="/" aria-label="GestureDeck home">
+          <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+            <path d="M7 8.5h18v15H7z" />
+            <path d="m12 19 4-5 4 5" />
+            <path d="M16 14v8" />
+          </svg>
+          <span>Gesture<span class="brand-light">Deck</span></span>
         </a>
-
-        <div class="topbar-right">
-          <span class="privacy-tag"><span class="privacy-dot" aria-hidden="true"></span> Local by design</span>
-          <span class="topbar-divider" aria-hidden="true"></span>
-          <span class="workspace-label">PRESENTER WORKSPACE</span>
-        </div>
+        <nav class="site-nav" aria-label="Main navigation">
+          <a href="#how-it-works">How it works</a>
+          <a class="local-link" href="/workspace.html">Local gesture version</a>
+        </nav>
       </header>
 
-      <main id="main-content" class="main-content">
-        <section class="welcome-row" aria-labelledby="page-title">
-          <div class="welcome-copy">
-            <p class="eyebrow">YOUR PRESENTER WORKSPACE</p>
-            <h1 id="page-title">Ready when you are.</h1>
-            <p class="welcome-description">Move through your deck with a simple swipe. Your camera stays off until you choose to begin.</p>
-            <button id="compact-start-setup" class="button button-primary setup-button compact-start-setup" type="button" hidden>
-              <span>Start setup</span>
+      <main id="main-content">
+        <section class="hero" aria-labelledby="hero-title">
+          <div class="hero-copy">
+            <h1 id="hero-title">The floor<br>is yours.</h1>
+            <p class="hero-description">Choose a PDF. Use your phone to move through the slides.</p>
+            <a class="primary-action" href="/workspace.html?experience=cloud">
+              <span>Start presenting</span>
               <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M4 10h11M10 5l5 5-5 5" /></svg>
-            </button>
+            </a>
+            <p class="privacy-note"><svg viewBox="0 0 18 18" aria-hidden="true" focusable="false"><rect x="3.5" y="7.5" width="11" height="8" rx="2"/><path d="M5.8 7.5V5.6a3.2 3.2 0 0 1 6.4 0v1.9"/></svg> No account · Your PDF stays in this browser</p>
           </div>
-          <div class="privacy-notice" role="status" aria-live="polite" aria-atomic="true">
-            <span class="notice-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" focusable="false">
-                <rect x="5" y="10" width="14" height="10" rx="2" />
-                <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-                <path d="M12 14v2" />
-              </svg>
-            </span>
-            <span class="notice-copy">
-              <strong id="camera-status" aria-live="polite">Camera off</strong>
-              <span id="camera-status-copy">Nothing is being captured.</span>
-            </span>
-            <span id="camera-status-badge" class="notice-check" aria-hidden="true">OFF</span>
+
+          <div class="preview" role="img" aria-label="A presentation slide displayed beside phone controls">
+            <div class="preview-halo" aria-hidden="true"></div>
+            <div class="slide-preview" aria-hidden="true">
+              <div class="slide-topline"><span>GESTUREDECK <i>/</i> STUDIO NOTES</span><span>A FIELD GUIDE · 2026</span></div>
+              <div class="slide-content">
+                <div class="slide-copy">
+                  <span class="slide-kicker">A FIELD GUIDE TO PRESENCE</span>
+                  <strong>Make room<br>for the moment.</strong>
+                  <span class="slide-summary">A small shift in how we present can change how a room feels.</span>
+                </div>
+                <div class="slide-art"><span class="art-sun"></span><span class="art-arch"></span><span class="art-line art-line-one"></span><span class="art-line art-line-two"></span></div>
+              </div>
+              <div class="slide-footer"><span>BETTER STORIES, LESS SCREEN TIME</span><span>GD — 01</span></div>
+            </div>
+            <div class="phone-preview" aria-hidden="true">
+              <div class="phone-speaker"></div>
+              <div class="phone-screen">
+                <div class="phone-top"><span>GESTUREDECK</span><span class="phone-live"><i></i> LIVE</span></div>
+                <span class="phone-counter">SLIDE <b>01</b> / 08</span>
+                <div class="remote-buttons"><span><svg viewBox="0 0 20 20"><path d="m12.5 4.5-5.5 5.5 5.5 5.5"/></svg></span><span><svg viewBox="0 0 20 20"><path d="m7.5 4.5 5.5 5.5-5.5 5.5"/></svg></span></div>
+                <span class="phone-caption">TAP TO MOVE THROUGH</span>
+              </div>
+            </div>
+            <span class="preview-caption">A quiet way to keep the room with you.</span>
           </div>
         </section>
 
-        <div class="workspace-grid">
-          <section class="deck-panel" aria-labelledby="deck-heading">
-            <div class="panel-heading deck-heading-row">
-              <div>
-                <p id="deck-eyebrow" class="eyebrow">SAMPLE DECK</p>
-                <h2 id="deck-heading">Field notes on presence</h2>
-              </div>
-              <div class="deck-heading-actions">
-                <span id="deck-format" class="deck-format"><span class="format-dot" aria-hidden="true"></span><span id="deck-format-label">Browser · Sample deck</span></span>
-                <button id="connect-phone" class="button button-secondary deck-file-button" type="button">Connect phone</button>
-                <button id="open-pdf" class="button button-secondary deck-file-button" type="button">Open PDF</button>
-                <button id="sample-deck" class="button button-secondary deck-file-button" type="button" hidden>Back to sample deck</button>
-                <button id="enter-pdf-fullscreen" class="button button-secondary deck-file-button" type="button" hidden>Present fullscreen</button>
-                <input id="pdf-file" type="file" accept=".pdf,application/pdf" hidden aria-label="Choose a PDF presentation">
-              </div>
-            </div>
+        <section id="how-it-works" class="steps-section" aria-labelledby="steps-title">
+          <div class="steps-heading">
+            <p class="eyebrow">THREE SIMPLE STEPS</p>
+            <h2 id="steps-title">Ready when you are.</h2>
+          </div>
+          <ol class="steps-list">
+            <li><span class="step-number">01</span><span>Choose a PDF</span></li>
+            <li><span class="step-number">02</span><span>Connect your phone</span></li>
+            <li><span class="step-number">03</span><span>Present</span></li>
+          </ol>
+        </section>
 
-            <p id="pdf-status" class="pdf-status" role="status" aria-live="polite" hidden></p>
-            <p id="pdf-error" class="pdf-error" role="alert" hidden></p>
-
-            <div id="deck-visual" class="slide-canvas" role="group" aria-labelledby="slide-title" aria-describedby="slide-copy">
-              <div id="sample-canvas-topline" class="canvas-topline">
-                <span class="canvas-wordmark">GESTUREDECK <span>/</span> STUDIO NOTES</span>
-                <span class="canvas-edition">A FIELD GUIDE&nbsp;&nbsp;·&nbsp;&nbsp;2026</span>
-              </div>
-
-              <div id="sample-canvas-content" class="canvas-content">
-                <div class="canvas-copy">
-                  <span id="slide-accent" class="slide-accent" aria-hidden="true"></span>
-                  <p id="slide-kicker" class="slide-kicker">A FIELD GUIDE TO PRESENCE</p>
-                  <h3 id="slide-title">Make room<br>for the moment.</h3>
-                  <p id="slide-copy" class="slide-copy">A small shift in how we present can change how a room feels.</p>
-                </div>
-                <div class="slide-art" aria-hidden="true">
-                  <span class="art-sun"></span>
-                  <span class="art-arch"></span>
-                  <span class="art-line art-line-one"></span>
-                  <span class="art-line art-line-two"></span>
-                  <span class="art-stamp">STAY<br>PRESENT</span>
-                </div>
-              </div>
-
-              <div id="sample-canvas-footer" class="canvas-footer">
-                <span>BETTER STORIES, LESS SCREEN TIME</span>
-                <span class="canvas-footer-mark" aria-hidden="true">GD&nbsp;—&nbsp;01</span>
-              </div>
-              <div id="pdf-stage" class="pdf-stage" hidden>
-                <canvas id="pdf-page" class="pdf-page-canvas" role="img" aria-label="PDF presentation page"></canvas>
-              </div>
-              <div id="pdf-fullscreen-toolbar" class="pdf-fullscreen-toolbar" role="group" aria-label="Fullscreen PDF controls" hidden>
-                <button id="fullscreen-previous" type="button" aria-label="Previous PDF page">Previous</button>
-                <span id="fullscreen-position" role="status" aria-live="polite" aria-atomic="true">1 / 1</span>
-                <button id="fullscreen-next" type="button" aria-label="Next PDF page">Next</button>
-                <button id="exit-pdf-fullscreen" type="button" aria-label="Exit fullscreen">Exit fullscreen</button>
-              </div>
-            </div>
-
-            <div class="deck-controls">
-              <div class="slide-position" aria-label="Slide position">
-                <span id="slide-number" class="slide-number">01</span>
-                <span class="position-divider" aria-hidden="true">/</span>
-                <span id="slide-count" class="slide-count">04</span>
-                <span class="position-label">SLIDE</span>
-              </div>
-              <div id="deck-progress" class="progress-track" role="progressbar" aria-label="Deck progress" aria-valuemin="1" aria-valuemax="4" aria-valuenow="1">
-                <span id="progress-fill" class="progress-fill"></span>
-              </div>
-              <div class="slide-actions" aria-label="Manual slide controls">
-                <button id="previous-slide" class="button button-secondary slide-button" type="button" aria-label="Previous slide">
-                  <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M12.5 4.5 7 10l5.5 5.5" /></svg>
-                  <span>Previous</span>
-                </button>
-                <button id="next-slide" class="button button-primary slide-button" type="button" aria-label="Next slide">
-                  <span>Next slide</span>
-                  <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="m7.5 4.5 5.5 5.5-5.5 5.5" /></svg>
-                </button>
-              </div>
-            </div>
-          </section>
-
-          <aside class="control-column" aria-label="Presentation controls and status">
-            <section class="session-panel" aria-labelledby="session-heading">
-              <div class="panel-heading session-heading-row">
-                <div>
-                  <p class="eyebrow">CONTROL ROOM</p>
-                  <h2 id="session-heading">Your session</h2>
-                </div>
-                <span class="session-state"><span class="state-dot" aria-hidden="true"></span><span id="session-state">IDLE</span></span>
-              </div>
-
-              <p id="session-message" class="session-message" role="status" aria-live="polite" aria-atomic="true">Camera off. Nothing is being captured.</p>
-
-              <div class="session-actions">
-                <button id="start-setup" class="button button-primary setup-button" type="button">
-                  <span>Start setup</span>
-                  <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M4 10h11M10 5l5 5-5 5" /></svg>
-                </button>
-                <button id="start-session" class="button button-primary setup-button" type="button" hidden>Start session</button>
-                <div class="session-action-row">
-                  <button id="pause-session" class="button button-secondary action-button" type="button" hidden>Pause</button>
-                  <button id="resume-session" class="button button-primary action-button" type="button" hidden>Resume</button>
-                  <button id="stop-session" class="button button-quiet action-button" type="button" hidden>Stop session</button>
-                </div>
-                <p class="setup-hint"><span class="hint-marker" aria-hidden="true">01</span> Setup first. You’ll test gestures before a live deck.</p>
-              </div>
-
-              <div class="camera-card">
-                <div class="camera-card-heading">
-                  <span class="camera-label">CAMERA PREVIEW</span>
-                  <button id="preview-toggle" class="preview-toggle" type="button" aria-pressed="false" hidden disabled>Show preview</button>
-                </div>
-                <div class="camera-stage">
-                  <video id="camera-preview" playsinline muted aria-label="Live camera preview" hidden></video>
-                  <canvas id="hand-overlay" class="hand-overlay" aria-hidden="true" hidden></canvas>
-                  <div id="camera-idle" class="camera-idle" aria-hidden="true">
-                    <span class="camera-glyph"><span></span></span>
-                    <span id="camera-idle-title" class="camera-idle-title">Preview is off</span>
-                    <span id="camera-idle-copy" class="camera-idle-copy">Start setup when you’re ready.</span>
-                  </div>
-                  <span id="preview-off-label" class="preview-off-label"><span aria-hidden="true"></span> CAMERA OFF</span>
-                </div>
-                <div id="camera-diagnostics" class="camera-diagnostics" role="group" aria-label="Live gesture guidance" aria-live="off" hidden>
-                  <div class="camera-diagnostics-heading">
-                    <span id="diagnostic-status-dot" class="camera-diagnostics-dot" data-state="searching" aria-hidden="true"></span>
-                    <span id="diagnostic-tracking" class="camera-diagnostics-state">Searching for hand</span>
-                    <span class="camera-diagnostics-local">ON DEVICE</span>
-                  </div>
-                  <div class="camera-diagnostics-metrics">
-                    <div class="camera-diagnostic-metric"><span>Position</span><strong id="diagnostic-position">—</strong></div>
-                    <div class="camera-diagnostic-metric"><span>Gesture</span><strong id="diagnostic-gesture">Waiting for hand</strong></div>
-                    <div class="camera-diagnostic-metric"><span>Travel</span><strong id="diagnostic-travel">0% / 14%</strong></div>
-                    <div class="camera-diagnostic-metric"><span>Latency / FPS</span><strong id="diagnostic-frame-time">—</strong></div>
-                  </div>
-                  <div id="diagnostic-progress" class="camera-diagnostics-progress" role="progressbar" aria-label="Swipe distance progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-                    <span id="diagnostic-progress-fill"></span>
-                  </div>
-                  <p id="diagnostic-hint" class="camera-diagnostics-hint">Left swipe advances · right swipe goes back</p>
-                </div>
-                <div id="camera-picker" class="camera-picker" hidden>
-                  <label for="camera-selection">Camera</label>
-                  <select id="camera-selection" name="camera-selection" disabled>
-                    <option value="">Default camera</option>
-                  </select>
-                </div>
-                <p class="camera-footnote">Preview stays visible during setup and live sessions. During a live session, use Hide preview to hide it. A local hand skeleton shows tracking; no video is saved or uploaded.</p>
-              </div>
-
-              <dl class="status-list" aria-label="Session status" aria-live="polite">
-                <div class="status-row">
-                  <dt><span class="status-symbol status-symbol-camera" aria-hidden="true"></span>Camera</dt>
-                  <dd id="camera-status-detail">Off</dd>
-                </div>
-                <div class="status-row">
-                  <dt><span class="status-symbol status-symbol-hand" aria-hidden="true"></span>Hand tracking</dt>
-                  <dd id="hand-status" aria-live="polite">Not started</dd>
-                </div>
-                <div class="status-row">
-                  <dt><span class="status-symbol status-symbol-target" aria-hidden="true"></span>Target app</dt>
-                  <dd id="target-status">Sample deck · browser demo</dd>
-                </div>
-              </dl>
-
-              <p id="error-message" class="error-message" role="alert" aria-live="assertive" hidden></p>
-              <p id="gesture-toast" class="gesture-toast" role="status" aria-live="polite" aria-atomic="true" hidden></p>
-
-              <div class="session-settings" aria-label="Gesture settings">
-                <div class="settings-heading">
-                  <span class="settings-title">Gesture settings</span>
-                  <span class="settings-note">Saved on this device</span>
-                </div>
-                <label class="sensitivity-control" for="gesture-sensitivity">
-                  <span class="sensitivity-label">Swipe threshold <output id="gesture-sensitivity-value" for="gesture-sensitivity" aria-live="polite">14%</output></span>
-                  <input id="gesture-sensitivity" type="range" min="10" max="32" step="1" value="14" aria-label="Gesture sensitivity">
-                </label>
-                <button id="reverse-mapping" class="button button-secondary mapping-button" type="button" aria-pressed="false">Reverse swipes: off</button>
-                <button id="reset-settings" class="button button-secondary mapping-button" type="button">Reset settings</button>
-              </div>
-            </section>
-
-            <section class="gesture-guide" aria-labelledby="gesture-heading">
-              <div class="guide-heading">
-                <div>
-                  <p class="eyebrow">TWO GESTURES, THAT’S ALL</p>
-                  <h2 id="gesture-heading">Keep your flow.</h2>
-                </div>
-                <span class="guide-symbol" aria-hidden="true">↔</span>
-              </div>
-              <div class="gesture-row">
-                <span class="gesture-direction" aria-hidden="true"><span class="direction-line direction-left"></span></span>
-                <span class="gesture-label">Swipe left</span>
-                <span id="left-gesture-result" class="gesture-result">Next slide</span>
-              </div>
-              <div class="gesture-row">
-                <span class="gesture-direction" aria-hidden="true"><span class="direction-line direction-right"></span></span>
-                <span class="gesture-label">Swipe right</span>
-                <span id="right-gesture-result" class="gesture-result">Previous</span>
-              </div>
-            </section>
-          </aside>
-        </div>
-
-        <footer class="page-footer">
-          <p><span class="footer-lock" aria-hidden="true">⌑</span> Your camera. Your device. Your call.</p>
-          <p>No footage saved <span aria-hidden="true">·</span> Works offline <span aria-hidden="true">·</span> Pause anytime</p>
+        <footer class="site-footer">
+          <p><span class="footer-lock" aria-hidden="true">◈</span> Your PDF stays in your browser. The cloud carries pairing and slide controls only.</p>
         </footer>
       </main>
     </div>
-
-    <dialog id="pairing-dialog" class="pairing-dialog" aria-labelledby="pairing-title" aria-describedby="pairing-description">
-      <div class="pairing-dialog-header">
-        <div>
-          <p class="eyebrow">LOCAL NETWORK REMOTE</p>
-          <h2 id="pairing-title">Connect your phone</h2>
-        </div>
-        <button id="close-pairing-dialog" class="button button-secondary pairing-close" type="button">Close</button>
-      </div>
-      <p id="pairing-description" class="pairing-description">Choose the private network your phone uses. Pair only on a trusted local network. The phone receives slide position and navigation controls only.</p>
-
-      <div class="pairing-interface-row">
-        <label for="pairing-interface">Private network interface</label>
-        <select id="pairing-interface" name="pairing-interface" aria-describedby="pairing-interface-help">
-          <option value="">Choose an interface</option>
-        </select>
-        <p id="pairing-interface-help" class="pairing-help">Connect both devices to the same Wi-Fi or Tailscale network.</p>
-        <button id="start-phone-remote" class="button button-primary" type="button" disabled>Start phone connection</button>
-      </div>
-
-      <p id="pairing-status" class="pairing-status" role="status" aria-live="polite" aria-atomic="true">Disconnected</p>
-
-      <figure id="pairing-qr-panel" class="pairing-qr-panel" hidden>
-        <img id="pairing-qr" alt="QR code for the phone pairing link">
-        <figcaption>Scan this code with your phone camera.</figcaption>
-      </figure>
-
-      <div id="pairing-url-panel" class="pairing-url-panel" hidden>
-        <label for="pairing-url">Pairing URL</label>
-        <div class="pairing-url-row">
-          <input id="pairing-url" type="url" readonly spellcheck="false" autocomplete="off">
-          <button id="copy-pairing-url" class="button button-secondary" type="button">Copy pairing URL</button>
-        </div>
-      </div>
-
-      <div class="pairing-dialog-actions">
-        <button id="new-pairing-link" class="button button-secondary" type="button" hidden>New pairing link</button>
-        <button id="disconnect-phone" class="button button-secondary" type="button" hidden>Disconnect phone</button>
-      </div>
-    </dialog>
-    <script type="module" src="app.js"></script>
   </body>
 </html>

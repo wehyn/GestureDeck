@@ -36,6 +36,18 @@ export function mountMobileRemotePhone({
     throw new TypeError('Phone remote browser APIs are unavailable');
   }
 
+  const search = new URLSearchParams(location.search ?? '');
+  const routeSessionId = (location.pathname ?? '').match(/^\/r\/([A-Za-z0-9_-]{16})$/)?.[1] ?? null;
+  const sessionParameter = search.get('session') ?? routeSessionId;
+  const cloudSessionId = typeof sessionParameter === 'string' && /^[A-Za-z0-9_-]{16}$/.test(sessionParameter)
+    ? sessionParameter
+    : null;
+  const invalidCloudSession = (search.has('session') || (location.pathname ?? '').startsWith('/r/')) && !cloudSessionId;
+  const phonePath = cloudSessionId
+    ? `/ws/cloud-remote/phone?session=${encodeURIComponent(cloudSessionId)}`
+    : PHONE_PATH;
+  const credentialKey = cloudSessionId ? `${CREDENTIAL_KEY}:${cloudSessionId}` : CREDENTIAL_KEY;
+
   const statusElement = document.getElementById('connection-status');
   const positionElement = document.getElementById('slide-position');
   const previousButton = document.getElementById('previous-button');
@@ -66,7 +78,7 @@ export function mountMobileRemotePhone({
   try {
     sessionStorage = providedSessionStorage ?? globalThis.sessionStorage;
     if (!sessionStorage || typeof sessionStorage.getItem !== 'function') throw new TypeError('Session storage is unavailable');
-    credential = sessionStorage.getItem(CREDENTIAL_KEY);
+    credential = sessionStorage.getItem(credentialKey);
   } catch {
     storageUnavailable = true;
     credential = null;
@@ -143,7 +155,7 @@ export function mountMobileRemotePhone({
 
   function clearCredential() {
     credential = null;
-    try { sessionStorage.removeItem(CREDENTIAL_KEY); } catch { /* Storage can be unavailable in private modes. */ }
+    try { sessionStorage.removeItem(credentialKey); } catch { /* Storage can be unavailable in private modes. */ }
   }
 
   function clearInviteFragment() {
@@ -230,7 +242,7 @@ export function mountMobileRemotePhone({
       && updateState(message.state)) {
       credential = message.credential;
       try {
-        sessionStorage.setItem(CREDENTIAL_KEY, credential);
+        sessionStorage.setItem(credentialKey, credential);
       } catch {
         terminal = true;
         send({ type: 'disconnect' }, target);
@@ -302,14 +314,14 @@ export function mountMobileRemotePhone({
     if (terminal || explicitlyDisconnected || socket && socket.readyState !== 3) return;
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     let nextSocket;
-    try { nextSocket = new WebSocketImpl(`${protocol}//${location.host}${PHONE_PATH}`); }
+    try { nextSocket = new WebSocketImpl(`${protocol}//${location.host}${phonePath}`); }
     catch {
       ready = false;
       renderControls();
       if (credential) {
         setStatus('Disconnected. Reconnecting…', 'error');
         scheduleRetry();
-      } else showRecovery('Could not connect. Scan a fresh pairing link and check the local Wi-Fi connection.', 'connection-failed');
+      } else showRecovery('Could not connect. Check your network and open a fresh pairing link.', 'connection-failed');
       return;
     }
     socket = nextSocket;
@@ -374,6 +386,9 @@ export function mountMobileRemotePhone({
   } else if (storageUnavailable) {
     terminal = true;
     showRecovery('Browser session storage is unavailable. Enable storage for this tab, then reopen the pairing link.', 'storage-unavailable');
+  } else if (invalidCloudSession) {
+    terminal = true;
+    showRecovery('This pairing link is invalid. Ask the presenter for a fresh link.', 'invalid-link');
   } else if (!invite) {
     terminal = true;
     showRecovery('Pairing link missing. Scan a fresh QR code or open a new link from the presenter.', 'missing-invite');

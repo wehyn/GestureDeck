@@ -1,6 +1,6 @@
 # GestureDeck
 
-GestureDeck is a local-first presentation controller that turns a webcam into a hands-free remote. Import a PDF, present it fullscreen, and use left and right hand swipes to move between pages. Hand tracking and swipe recognition run on the presenter's device, so camera frames aren't sent to a cloud AI service. The camera starts only when the presenter chooses setup and can be paused or stopped at any time.
+GestureDeck lets you present its sample deck or a PDF from your browser. Use the local version for hands-free camera gestures, or use a phone as a slide remote. PDF pages are rendered in the presenter’s browser; the cloud remote relays pairing and slide controls only. Camera frames and PDF files are not uploaded.
 
 ## Submission links
 
@@ -29,6 +29,7 @@ Hand tracking needs a continuous camera feed and timely feedback during a presen
 - Camera capture, after you explicitly start setup or a session.
 - MediaPipe hand-landmark inference and swipe recognition in the browser, using the model and WebAssembly runtime served from local project files.
 - The sample slide deck, imported PDF rendering, hand-skeleton preview, and gesture settings. Settings are saved in this browser on this device; imported PDFs are kept only in memory for the current page session.
+- The PDF file and rendered pages stay in the presenter’s browser, including when using the cloud phone remote.
 
 Camera frames and hand landmarks are not uploaded or saved. The camera is off until you choose to start it, and stopping the session releases the camera.
 
@@ -38,7 +39,7 @@ Camera frames and hand landmarks are not uploaded or saved. The camera is off un
 - The initial `npm install` when the required package is not already available in the local npm cache.
 - Publishing or viewing the demo video and LinkedIn post.
 
-After dependencies are installed, the sample deck, PDF import, and hand tracking can run offline. The hand model is included in this repository, and the MediaPipe and PDF.js runtimes are served locally; the app does not call a cloud inference API. PDF files and rendered pages are not uploaded or saved by GestureDeck.
+After dependencies are installed, the sample deck, PDF import, and hand tracking can run offline. The hand model is included in this repository, and the MediaPipe and PDF.js runtimes are served locally; the app does not call a cloud inference API. A hosted GestureDeck instance is needed when you want a phone on a different network to control the presenter browser.
 
 ## Models used
 
@@ -60,7 +61,7 @@ Model source: [MediaPipe Hand Landmarker float16 model](https://storage.googleap
 ## APIs and cloud services
 
 - **Runtime browser APIs:** `getUserMedia` for camera capture, Canvas for preview and PDF pages, the Fullscreen API for presenting, and `localStorage` for gesture settings.
-- **Runtime cloud services and hosted AI APIs:** None. Hand inference, swipe recognition, and PDF rendering run on the device. The app's HTTP server listens on all interfaces and serves local project files.
+- **Runtime cloud services and hosted AI APIs:** No hosted AI APIs are used. Hand inference, swipe recognition, and PDF rendering run on the device. When deployed over HTTPS, the app server can relay temporary phone pairing and slide navigation messages; it does not receive PDF bytes, slide text, rendered pages, notes, or camera data.
 - **Services used outside the running app:** GitHub hosts this public repository; npm may be needed to download dependencies during installation. YouTube hosts the demo video and LinkedIn hosts the video post; viewing them requires internet access.
 
 ## Existing code and assets
@@ -86,13 +87,13 @@ npm run dev
 
 Open `http://127.0.0.1:5173`.
 
-To show your own presentation, click **Open PDF** and choose an unprotected `.pdf` file. Each page becomes a slide. Click **Present fullscreen** to fill the browser display; browsers require this click before entering fullscreen. The Previous/Next/Exit controls appear when you move the pointer or focus them, then fade while idle. The left/right arrow keys and the same swipe gestures after starting a session also navigate pages. Press Escape or click **Exit fullscreen** to return to the workspace, or click **Back to sample deck** to return to the built-in example. Password-protected PDFs are not supported in this version. GestureDeck does not upload or store the PDF.
+On the home page, click **Start presenting** to open the workspace. Then click **Open PDF** and choose an unprotected `.pdf` file. Each page becomes a slide. Click **Present fullscreen** to fill the browser display; browsers require this click before entering fullscreen. The Previous/Next/Exit controls appear when you move the pointer or focus them, then fade while idle. The left/right arrow keys and the same swipe gestures after starting a session also navigate pages. Press Escape or click **Exit fullscreen** to return to the workspace, or click **Back to sample deck** to return to the built-in example. Password-protected PDFs are not supported in this version. GestureDeck does not upload or store the PDF.
 
-## Use GestureDeck from your phone
+## Use the local phone remote
 
 The mobile remote controls the active sample deck or imported PDF from a phone browser on the same local network.
 
-1. Start GestureDeck and open it on the presenter computer at `http://localhost:5173` (or `http://127.0.0.1:5173`) so the browser can grant camera access. Plain HTTP on a LAN or Tailscale IP cannot access the camera.
+1. Start GestureDeck and open it on the presenter computer at `http://localhost:5173` (or `http://127.0.0.1:5173`), then click **Start presenting**. Plain HTTP on a LAN or Tailscale IP cannot access the camera.
 2. Connect both devices to the same trusted Wi-Fi network or Tailscale network.
 3. Choose **Connect phone**, select the private network interface used by the phone, and start the connection.
 4. Scan the QR code or copy the fallback URL to the phone. The pairing link expires after two minutes and can be renewed from the presenter dialog.
@@ -101,7 +102,13 @@ The mobile remote controls the active sample deck or imported PDF from a phone b
 
 The main GestureDeck server binds to `0.0.0.0`; open it over loopback on the presenter computer for camera access. The QR code or fallback URL uses the selected Wi-Fi or Tailscale address for the phone. The presenter controls stay restricted to connections from that computer. Only while a remote session is active, a separate temporary listener binds to the selected Wi-Fi or Tailscale IPv4 interface and serves the phone controls. It closes when the presenter stops the remote or closes the page. Pair only on a trusted network: local HTTP and WebSocket control traffic is unencrypted outside the Tailscale tunnel.
 
-The phone receives only the slide index, slide count, busy state, and navigation commands. It does not download slide content, PDF bytes, filenames, rendered pages, or camera data. The remote needs no internet connection, account, phone app, camera permission, PDF upload, slide transfer, or hosted QR service.
+The phone receives only the slide index, slide count, busy state, and navigation commands. It does not download slide content, PDF bytes, filenames, rendered pages, or camera data. The local remote needs no internet connection, account, phone app, camera permission, PDF upload, slide transfer, or hosted QR service.
+
+## Use the cloud phone remote
+
+Open the hosted GestureDeck home page over HTTPS and choose **Start presenting**. The presenter chooses a sample deck or a PDF in that browser, then pairs a phone using the QR code or link. The phone can be on another network. The server relays the pairing and slide controls; the PDF stays in the presenter’s browser.
+
+Cloud sessions are temporary and held in memory by one running Node.js process. They stop when the presenter ends the session, disconnects, or reaches the four-hour limit; a server restart ends all active sessions. V1 supports one phone per presenter session, no accounts, and no shared presenter roles or notes. The reverse proxy must preserve same-origin requests and forward WebSocket upgrades. Use HTTPS so phone connections use secure WebSockets.
 
 ## Current prototype boundary
 

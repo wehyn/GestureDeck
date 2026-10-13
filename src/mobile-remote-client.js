@@ -31,7 +31,7 @@ function validCommand(message) {
 }
 
 /**
- * Connect a presenter to its local server. onConnection receives
+ * Connect a presenter to its local or cloud server. onConnection receives
  * { type: 'authenticated' | 'rejected' | 'closed' | 'phonePaired' |
  *   'inviteExpired' | 'sessionEnded', reason?: string }.
  * Only rejection includes a reason. No reconnect is attempted.
@@ -41,6 +41,7 @@ export function createMobileRemoteClient({
   onCommand = () => false,
   onConnection = () => {},
   hostCredential,
+  path = PRESENTER_PATH,
   location = globalThis.location,
 }) {
   if (typeof WebSocketImpl !== 'function') throw new TypeError('WebSocket is unavailable');
@@ -49,6 +50,9 @@ export function createMobileRemoteClient({
   }
   if (typeof hostCredential !== 'string' || hostCredential.length === 0) {
     throw new TypeError('hostCredential must be a non-empty string');
+  }
+  if (typeof path !== 'string' || !path.startsWith('/') || /[\r\n]/.test(path)) {
+    throw new TypeError('path must be an absolute WebSocket path');
   }
 
   let socket;
@@ -107,7 +111,7 @@ export function createMobileRemoteClient({
   function connect() {
     if (socket || closed) return;
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    socket = new WebSocketImpl(`${protocol}//${location.host}${PRESENTER_PATH}`);
+    socket = new WebSocketImpl(`${protocol}//${location.host}${path}`);
     socket.onopen = () => send({ type: 'presenter', credential: hostCredential });
     socket.onmessage = handleMessage;
     socket.onclose = () => {
