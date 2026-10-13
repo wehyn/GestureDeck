@@ -44,7 +44,7 @@ export function mountMobileRemotePhone({
     : null;
   const invalidCloudSession = (search.has('session') || (location.pathname ?? '').startsWith('/r/')) && !cloudSessionId;
   const phonePath = cloudSessionId
-    ? `/ws/cloud-remote/phone?session=${encodeURIComponent(cloudSessionId)}`
+    ? `/api/cloud-remote-ws?__gd_route=phone&session=${encodeURIComponent(cloudSessionId)}`
     : PHONE_PATH;
   const credentialKey = cloudSessionId ? `${CREDENTIAL_KEY}:${cloudSessionId}` : CREDENTIAL_KEY;
 

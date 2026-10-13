@@ -888,7 +888,7 @@ async function startCloudMobileRemote() {
     show(elements.disconnectPhone, true);
     updatePairingStartButton();
     setPairingStatus('Waiting for the presenter connection…');
-    const path = `/ws/cloud-remote/presenter?session=${encodeURIComponent(result.sessionId)}`;
+    const path = `/api/cloud-remote-ws?__gd_route=presenter&session=${encodeURIComponent(result.sessionId)}`;
     mobileRemoteClient = connectMobileRemote({
       hostCredential: result.hostCredential,
       path,
