@@ -20,7 +20,7 @@ test('served app shell loads the client controller module', async () => {
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
     const origin = `http://127.0.0.1:${server.address().port}`;
-    const page = await fetch(`${origin}/`);
+    const page = await fetch(`${origin}/workspace.html`);
     assert.equal(page.status, 200);
     const html = await page.text();
     assert.ok(html.includes('<script type="module" src="app.js"></script>'));

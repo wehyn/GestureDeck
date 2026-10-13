@@ -90,10 +90,14 @@ function storage(seed = {}) {
   };
 }
 
-function setup({ hash = '#invite-1', credential, total = 18, locationExtras = {}, crypto, storageImpl } = {}) {
+function setup({
+  hash = '#invite-1', credential, total = 18, locationExtras = {}, crypto, storageImpl,
+  userAgent = '', nickname = '',
+} = {}) {
   FakeWebSocket.instances.length = 0;
   const document = new FakeDocument();
   if (crypto !== undefined) document.defaultView.crypto = crypto;
+  document.getElementById('device-nickname').value = nickname;
   const location = {
     protocol: 'http:', host: '192.168.1.42:43123', pathname: '/remote', search: '',
     hash, href: `http://192.168.1.42:43123/remote${hash}`,
@@ -103,14 +107,22 @@ function setup({ hash = '#invite-1', credential, total = 18, locationExtras = {}
   const sessionStorage = storageImpl ?? storage(credential ? { phoneSessionCredential: credential } : {});
   const phone = mountMobileRemotePhone({
     document, location, history, sessionStorage, WebSocketImpl: FakeWebSocket,
+    navigatorImpl: { userAgent },
   });
-  return { document, location, history, sessionStorage, phone, socket: FakeWebSocket.instances[0], total };
+  return {
+    document, location, history, sessionStorage, phone, total,
+    get socket() { return FakeWebSocket.instances[0]; },
+  };
 }
 
 function paired(setupResult, state = { index: 0, total: 18, busy: false }) {
+  setupResult.document.getElementById('connect-button').dispatch('click');
   const { socket } = setupResult;
   socket.open();
-  socket.message({ type: 'paired', credential: 'phone-secret', state });
+  socket.message({
+    type: 'paired', credential: 'phone-secret', phoneId: 'phone-id',
+    label: 'Phone 1', deviceType: 'phone', state,
+  });
 }
 
 test('missing invite shows a recovery message and does not open a socket', () => {
@@ -133,8 +145,9 @@ test('unreadable session storage mounts terminal recovery without opening a sock
 
 test('expired invite rejection shows specific recovery guidance', () => {
   const result = setup();
+  result.document.getElementById('connect-button').dispatch('click');
   result.socket.open();
-  assert.deepEqual(result.socket.sent, [{ type: 'pair', invite: 'invite-1' }]);
+  assert.deepEqual(result.socket.sent, [{ type: 'pair', invite: 'invite-1', nickname: '', deviceType: 'phone' }]);
   result.socket.message({ type: 'pairRejected', reason: 'expired' });
   assert.equal(result.socket.readyState, 3);
   assert.match(result.document.getElementById('connection-status').textContent, /expired/i);
@@ -142,13 +155,14 @@ test('expired invite rejection shows specific recovery guidance', () => {
   assert.equal(result.document.getElementById('previous-button').disabled, true);
 });
 
-test('pair rejection renders reason-specific recovery for invalid, already paired, and unavailable hosts', () => {
+test('pair rejection renders reason-specific recovery for invalid, full, and unavailable hosts', () => {
   for (const [reason, expected] of [
     ['invalid', /invalid/i],
-    ['already-paired', /already connected|already paired/i],
+    ['session-full', /eight phones/i],
     ['host-unavailable', /presenter|ready/i],
   ]) {
     const result = setup();
+    result.document.getElementById('connect-button').dispatch('click');
     result.socket.open();
     result.socket.message({ type: 'pairRejected', reason });
     assert.match(result.document.getElementById('connection-status').textContent, expected);
@@ -157,16 +171,20 @@ test('pair rejection renders reason-specific recovery for invalid, already paire
   }
 });
 
-test('valid invite pairs, stores only the credential, and removes the fragment', () => {
+test('valid invite pairs, stores its credential and label, and removes the fragment', () => {
   const result = setup();
+  result.document.getElementById('connect-button').dispatch('click');
   assert.equal(result.socket.url, 'ws://192.168.1.42:43123/ws/mobile-remote/phone');
   result.socket.open();
-  assert.deepEqual(result.socket.sent, [{ type: 'pair', invite: 'invite-1' }]);
+  assert.deepEqual(result.socket.sent, [{
+    type: 'pair', invite: 'invite-1', nickname: '', deviceType: 'phone',
+  }]);
   result.socket.message({
-    type: 'paired', credential: 'phone-secret', state: { index: 3, total: 18, busy: false },
+    type: 'paired', credential: 'phone-secret', phoneId: 'phone-id', label: 'Phone 1',
+    deviceType: 'phone', state: { index: 3, total: 18, busy: false },
   });
 
-  assert.deepEqual([...result.sessionStorage.values.values()], ['phone-secret']);
+  assert.deepEqual([...result.sessionStorage.values.values()], ['phone-secret', 'Phone 1']);
   assert.deepEqual(result.history.calls, [[null, '', '/remote']]);
   assert.equal(result.document.getElementById('slide-position').textContent, '4 / 18');
   assert.match(result.document.getElementById('connection-status').textContent, /connected/i);
@@ -175,6 +193,7 @@ test('valid invite pairs, stores only the credential, and removes the fragment',
 
 test('credential storage failure disconnects the paired phone and clears storage', () => {
   const result = setup();
+  result.document.getElementById('connect-button').dispatch('click');
   result.socket.open();
   result.sessionStorage.values.set('phoneSessionCredential', 'stale-secret');
   result.sessionStorage.setItem = (key, value) => {
@@ -182,11 +201,12 @@ test('credential storage failure disconnects the paired phone and clears storage
     throw new Error('storage unavailable');
   };
   result.socket.message({
-    type: 'paired', credential: 'phone-secret', state: { index: 0, total: 5, busy: false },
+    type: 'paired', credential: 'phone-secret', phoneId: 'phone-id', label: 'Phone 1',
+    deviceType: 'phone', state: { index: 0, total: 5, busy: false },
   });
 
   assert.deepEqual(result.socket.sent, [
-    { type: 'pair', invite: 'invite-1' }, { type: 'disconnect' },
+    { type: 'pair', invite: 'invite-1', nickname: '', deviceType: 'phone' }, { type: 'disconnect' },
   ]);
   assert.equal(result.socket.readyState, 3);
   assert.equal(result.sessionStorage.values.size, 0);
@@ -197,25 +217,75 @@ test('credential storage failure disconnects the paired phone and clears storage
 
 test('history cleanup failure keeps the successfully stored paired session active', () => {
   const result = setup();
+  result.document.getElementById('connect-button').dispatch('click');
   result.socket.open();
   result.history.replaceState = () => { throw new Error('history unavailable'); };
   result.socket.message({
-    type: 'paired', credential: 'phone-secret', state: { index: 2, total: 8, busy: false },
+    type: 'paired', credential: 'phone-secret', phoneId: 'phone-id', label: 'Phone 1',
+    deviceType: 'phone', state: { index: 2, total: 8, busy: false },
   });
 
   assert.equal(result.sessionStorage.values.get('phoneSessionCredential'), 'phone-secret');
   assert.equal(result.location.hash, '');
-  assert.deepEqual(result.socket.sent, [{ type: 'pair', invite: 'invite-1' }]);
+  assert.deepEqual(result.socket.sent, [{
+    type: 'pair', invite: 'invite-1', nickname: '', deviceType: 'phone',
+  }]);
   assert.equal(result.socket.readyState, FakeWebSocket.OPEN);
   assert.match(result.document.getElementById('connection-status').textContent, /connected/i);
   assert.equal(result.document.getElementById('next-button').disabled, false);
+});
+
+test('sends an optional nickname and lightweight device type, then keeps the assigned label on resume', () => {
+  const result = setup({ nickname: '  Alex  Phone ', userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)' });
+  result.document.getElementById('connect-button').dispatch('click');
+  result.socket.open();
+
+  assert.deepEqual(result.socket.sent, [{
+    type: 'pair', invite: 'invite-1', nickname: 'Alex Phone', deviceType: 'iphone',
+  }]);
+  result.socket.message({
+    type: 'paired', credential: 'phone-secret', phoneId: 'phone-id', label: 'Alex Phone',
+    deviceType: 'iphone', state: { index: 0, total: 18, busy: false },
+  });
+  assert.equal(result.document.getElementById('connected-as').textContent, 'Connected as Alex Phone');
+  assert.equal(result.sessionStorage.values.get('phoneSessionLabel'), 'Alex Phone');
+
+  const resumed = setup({ hash: '', credential: 'phone-secret', storageImpl: result.sessionStorage });
+  resumed.socket.open();
+  resumed.socket.message({
+    type: 'resumed', phoneId: 'phone-id', label: 'Alex Phone', deviceType: 'iphone',
+    state: { index: 0, total: 18, busy: false },
+  });
+  assert.equal(resumed.document.getElementById('connected-as').textContent, 'Connected as Alex Phone');
+});
+
+test('uses best-effort device labels without a nickname and falls back to Phone for unknown browsers', () => {
+  for (const [userAgent, deviceType, label] of [
+    ['Mozilla/5.0 (Linux; Android 15; Pixel 9 Mobile)', 'android-phone', 'Android phone 1'],
+    ['', 'phone', 'Phone 1'],
+  ]) {
+    const result = setup({ userAgent });
+    result.document.getElementById('connect-button').dispatch('click');
+    result.socket.open();
+    assert.deepEqual(result.socket.sent[0], {
+      type: 'pair', invite: 'invite-1', nickname: '', deviceType,
+    });
+    result.socket.message({
+      type: 'paired', credential: 'phone-secret', phoneId: 'phone-id', label,
+      deviceType, state: { index: 0, total: 18, busy: false },
+    });
+    assert.equal(result.document.getElementById('connected-as').textContent, `Connected as ${label}`);
+  }
 });
 
 test('reload resumes with the stored credential and replaces position from current state', () => {
   const result = setup({ hash: '', credential: 'phone-secret' });
   result.socket.open();
   assert.deepEqual(result.socket.sent, [{ type: 'resume', credential: 'phone-secret' }]);
-  result.socket.message({ type: 'resumed', state: { index: 10, total: 18, busy: false } });
+  result.socket.message({
+    type: 'resumed', phoneId: 'phone-id', label: 'Phone 1', deviceType: 'phone',
+    state: { index: 10, total: 18, busy: false },
+  });
   assert.equal(result.document.getElementById('slide-position').textContent, '11 / 18');
   assert.equal(result.document.getElementById('slide-number').value, '11');
   assert.match(result.document.getElementById('connection-status').textContent, /connected/i);
@@ -241,7 +311,10 @@ test('resume rejection and session end clear the stored credential', () => {
 test('temporary close preserves credential, shows disconnected, and resumes with bounded backoff', () => {
   const result = setup({ hash: '', credential: 'phone-secret' });
   result.socket.open();
-  result.socket.message({ type: 'resumed', state: { index: 6, total: 18, busy: false } });
+  result.socket.message({
+    type: 'resumed', phoneId: 'phone-id', label: 'Phone 1', deviceType: 'phone',
+    state: { index: 6, total: 18, busy: false },
+  });
   result.socket.close();
 
   assert.equal(result.sessionStorage.values.get('phoneSessionCredential'), 'phone-secret');
@@ -252,7 +325,10 @@ test('temporary close preserves credential, shows disconnected, and resumes with
   const reconnect = FakeWebSocket.instances[1];
   reconnect.open();
   assert.deepEqual(reconnect.sent, [{ type: 'resume', credential: 'phone-secret' }]);
-  reconnect.message({ type: 'resumed', state: { index: 12, total: 18, busy: false } });
+  reconnect.message({
+    type: 'resumed', phoneId: 'phone-id', label: 'Phone 1', deviceType: 'phone',
+    state: { index: 12, total: 18, busy: false },
+  });
   assert.equal(result.document.getElementById('slide-position').textContent, '13 / 18');
 });
 
@@ -330,7 +406,10 @@ test('command acknowledgements update action status', () => {
 test('explicit Disconnect sends disconnect, clears credential, and prevents reconnect', () => {
   const result = setup({ hash: '', credential: 'phone-secret' });
   result.socket.open();
-  result.socket.message({ type: 'resumed', state: { index: 0, total: 3, busy: false } });
+  result.socket.message({
+    type: 'resumed', phoneId: 'phone-id', label: 'Phone 1', deviceType: 'phone',
+    state: { index: 0, total: 3, busy: false },
+  });
   result.document.getElementById('disconnect-button').dispatch('click');
 
   assert.deepEqual(result.socket.sent.at(-1), { type: 'disconnect' });

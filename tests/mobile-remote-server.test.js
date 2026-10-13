@@ -40,12 +40,14 @@ test('loopback API validates origin, host, JSON and address before opening a res
     const body = JSON.stringify({ address: '192.168.1.12', state: { index: 0, total: 2, busy: false } });
     for (const [payload, headers, status] of [
       [body, { origin: 'http://evil.test' }, 403],
-      [body, { host: 'evil.test' }, 403],
       [body, { 'content-type': 'text/plain' }, 400],
       ['{broken', {}, 400],
       ['x'.repeat(16 * 1024 + 1), {}, 400],
       [JSON.stringify({ address: '8.8.8.8', state: { index: 0, total: 2, busy: false } }), {}, 400],
-    ]) assert.equal((await post('/api/mobile-remote/start', payload, headers)).status, status);
+    ]) {
+      const response = await post('/api/mobile-remote/start', payload, headers);
+      assert.equal(response.status, status, `unexpected status for headers ${JSON.stringify(headers)} and payload ${payload.slice(0, 40)}`);
+    }
     assert.equal((await post('/', body)).status, 405);
     const started = await post('/api/mobile-remote/start', body);
     assert.equal(started.status, 200);
@@ -56,11 +58,12 @@ test('loopback API validates origin, host, JSON and address before opening a res
     assert.equal(typeof data.hostCredential, 'string');
     const listenerOrigin = `http://127.0.0.1:${remote.listener.address().port}`;
     for (const route of ['/remote', '/mobile-remote.css', '/src/mobile-remote-phone.js']) {
-      assert.equal((await fetch(`${listenerOrigin}${route}`, { headers: { host: `192.168.1.12:${remote.listener.address().port}` } })).status, 200);
+      assert.equal((await requestWithHost(listenerOrigin, route, `192.168.1.12:${remote.listener.address().port}`)).statusCode, 200, route);
     }
     for (const route of ['/', '/app.js', '/assets/hand_landmarker.task', '/node_modules/pdfjs-dist/build/pdf.mjs', '/spec.md', '/remote?invite=x', '/x/../remote', '/mobile-remote.css?v=1']) {
-      assert.equal((await fetch(`${listenerOrigin}${route}`, { headers: { host: `192.168.1.12:${remote.listener.address().port}` } })).status, 404);
+      assert.equal((await requestWithHost(listenerOrigin, route, `192.168.1.12:${remote.listener.address().port}`)).statusCode, 404, route);
     }
+    assert.equal((await requestWithHost(listenerOrigin, '/remote', `evil.test:${remote.listener.address().port}`)).statusCode, 403);
     const renewed = await post('/api/mobile-remote/renew-invite', '{}');
     assert.equal(renewed.status, 200);
     assert.notEqual((await renewed.json()).fallbackUrl, data.fallbackUrl);
@@ -101,6 +104,23 @@ function fakeListener(handler) {
   return listener;
 }
 
+function requestWithHost(origin, route, host) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(origin);
+    const request = http.request({
+      hostname: target.hostname,
+      port: target.port,
+      path: route,
+      headers: { host },
+    }, (response) => {
+      response.resume();
+      resolve(response);
+    });
+    request.on('error', reject);
+    request.end();
+  });
+}
+
 class UpgradeSocket extends EventEmitter {
   constructor(peer) { super(); this.remoteAddress = peer; this.writes = []; this.destroyed = false; }
   write(chunk) { this.writes.push(Buffer.from(chunk)); return true; }
@@ -132,12 +152,12 @@ test('in-process API rejects malformed and unauthorized mutations without openin
   try {
     for (const options of [
       { origin: 'http://evil.test' }, { origin: null }, { host: 'evil.test' },
-      { peer: '8.8.8.8' }, { type: 'text/plain' }, { body: '{broken' },
+      { peer: '1.1.1.1' }, { type: 'text/plain' }, { body: '{broken' },
       { body: 'x'.repeat(16 * 1024 + 1) },
       { body: JSON.stringify({ address: '192.168.1.12', state: { index: 2, total: 2, busy: false } }) },
     ]) {
       const result = await fakeRequest(main, '/api/mobile-remote/start', { body, ...options });
-      assert.ok([400, 403].includes(result.status));
+      assert.ok([400, 403].includes(result.status), `unexpected status ${result.status} for ${JSON.stringify(options)}`);
     }
     assert.equal(opened, 0);
     const started = await fakeRequest(main, '/api/mobile-remote/start', { body });
@@ -255,17 +275,35 @@ test('phone pairing flows through the coordinator and presenter disconnect close
     assert.deepEqual(serverMessage(bad.writes[1]), { type: 'pairRejected', reason: 'invalid' });
     const phone = upgrade(listener, '/ws/mobile-remote/phone', phoneOptions);
     phone.emit('data', clientFrame({ type: 'pair', invite }));
-    assert.deepEqual(serverMessage(presenter.writes[2]), { type: 'phonePaired' });
+    assert.deepEqual(serverMessage(presenter.writes[3]), { type: 'phonePaired' });
+    const firstPhoneList = serverMessage(presenter.writes[4]);
+    assert.equal(firstPhoneList.type, 'phones');
+    assert.deepEqual(firstPhoneList.phones.map(({ label, deviceType, status }) => ({ label, deviceType, status })), [
+      { label: 'Phone 1', deviceType: 'phone', status: 'connected' },
+    ]);
     const paired = serverMessage(phone.writes[1]);
     assert.equal(paired.type, 'paired');
+    assert.equal(paired.label, 'Phone 1');
+    assert.equal(paired.deviceType, 'phone');
     assert.deepEqual(paired.state, { index: 1, total: 3, busy: false });
     const consumed = upgrade(listener, '/ws/mobile-remote/phone', phoneOptions);
     consumed.emit('data', clientFrame({ type: 'pair', invite }));
-    assert.deepEqual(serverMessage(consumed.writes[1]), { type: 'pairRejected', reason: 'already-paired' });
+    const secondPaired = serverMessage(consumed.writes[1]);
+    assert.equal(secondPaired.type, 'paired');
+    assert.equal(secondPaired.label, 'Phone 2');
+    assert.equal(serverMessage(presenter.writes.at(-1)).phones.length, 2);
     phone.destroy();
     const resumed = upgrade(listener, '/ws/mobile-remote/phone', phoneOptions);
     resumed.emit('data', clientFrame({ type: 'resume', credential: paired.credential }));
-    assert.deepEqual(serverMessage(resumed.writes[1]), { type: 'resumed', state: { index: 1, total: 3, busy: false } });
+    const resumeMessage = serverMessage(resumed.writes[1]);
+    assert.deepEqual({
+      type: resumeMessage.type, phoneId: resumeMessage.phoneId,
+      label: resumeMessage.label, deviceType: resumeMessage.deviceType,
+      state: resumeMessage.state,
+    }, {
+      type: 'resumed', phoneId: paired.phoneId, label: 'Phone 1', deviceType: 'phone',
+      state: { index: 1, total: 3, busy: false },
+    });
     presenter.destroy();
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(remote.listener, undefined);

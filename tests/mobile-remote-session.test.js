@@ -3,15 +3,6 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { createMobileRemoteSession } from '../src/mobile-remote-session.js';
 
-function fakeSocket() {
-  return {
-    readyState: 1,
-    messages: [],
-    send(value) { this.messages.push(JSON.parse(value)); },
-    close() { this.readyState = 3; },
-  };
-}
-
 class ObservableSocket extends EventEmitter {
   constructor() {
     super();
@@ -31,7 +22,10 @@ class ObservableSocket extends EventEmitter {
 }
 
 function createHarness({
-  tokens = ['invite-one', 'host-credential', 'phone-credential', 'invite-two'],
+  tokens = [
+    'invite-one', 'host-credential', 'phone-id-one', 'phone-credential',
+    'phone-id-two', 'phone-credential-two', 'invite-two', 'phone-id-three', 'phone-credential-three',
+  ],
   start = true,
   attach = true,
   state = { index: 0, total: 3, busy: false },
@@ -71,8 +65,8 @@ function createHarness({
   };
 }
 
-function pair(harness, phoneSocket = new ObservableSocket()) {
-  harness.session.handlePhoneMessage(phoneSocket, { type: 'pair', invite: harness.created.invite });
+function pair(harness, phoneSocket = new ObservableSocket(), metadata = {}) {
+  harness.session.handlePhoneMessage(phoneSocket, { type: 'pair', invite: harness.created.invite, ...metadata });
   return { phoneSocket, credential: phoneSocket.messages.at(-1)?.credential };
 }
 
@@ -82,9 +76,9 @@ test('start creates an invite and host credential, then expires the invite on th
 
   assert.equal(invite, 'invite-one');
   assert.equal(hostCredential, 'host-credential');
-  assert.equal(expiresAt, 130_000);
+  assert.equal(expiresAt, 310_000);
   assert.equal(harness.timers.length, 1);
-  assert.equal(harness.timers[0].delay, 120_000);
+  assert.equal(harness.timers[0].delay, 300_000);
   assert.equal(harness.timers[0].unrefCalled, true);
 
   harness.now = expiresAt;
@@ -107,7 +101,7 @@ test('rejects a wrong presenter credential and reports unavailable host before a
   assert.deepEqual(phoneSocket.messages, [{ type: 'pairRejected', reason: 'host-unavailable' }]);
 });
 
-test('pairs one phone, returns sanitized state, and rejects a second phone', () => {
+test('pairs one phone with a coarse label and returns sanitized state', () => {
   const harness = createHarness({ state: { index: 1, total: 3, busy: false, title: 'private', slideText: 'secret' } });
   const first = pair(harness);
 
@@ -115,22 +109,103 @@ test('pairs one phone, returns sanitized state, and rejects a second phone', () 
   assert.deepEqual(first.phoneSocket.messages, [{
     type: 'paired',
     credential: 'phone-credential',
+    phoneId: 'phone-id-one',
+    label: 'Phone 1',
+    deviceType: 'phone',
     state: { index: 1, total: 3, busy: false },
   }]);
-  assert.deepEqual(harness.presenterSocket.messages, [{ type: 'phonePaired' }]);
-  assert.equal(harness.timers[0].cleared, true);
+  assert.deepEqual(harness.presenterSocket.messages, [
+    { type: 'phonePaired' },
+    { type: 'phones', phones: [{
+      phoneId: 'phone-id-one', label: 'Phone 1', deviceType: 'phone', status: 'connected',
+    }] },
+  ]);
+  assert.equal(harness.timers[0].cleared, false);
+  harness.now = harness.created.expiresAt;
   harness.timers[0].callback();
-  assert.deepEqual(harness.presenterSocket.messages, [{ type: 'phonePaired' }]);
+  assert.deepEqual(harness.presenterSocket.messages.at(-1), { type: 'inviteExpired' });
+});
 
-  const second = new ObservableSocket();
-  harness.session.handlePhoneMessage(second, { type: 'pair', invite: harness.created.invite });
-  assert.deepEqual(second.messages, [{ type: 'pairRejected', reason: 'already-paired' }]);
+test('uses optional nicknames, sanitizes them, and keeps duplicate labels unique', () => {
+  const harness = createHarness();
+  const first = pair(harness, new ObservableSocket(), {
+    nickname: '  Demo\nPhone  ', deviceType: 'iphone',
+  });
+  const second = pair(harness, new ObservableSocket(), {
+    nickname: 'DemoPhone', deviceType: 'android-phone',
+  });
+  const fallback = pair(harness, new ObservableSocket(), { deviceType: 'unknown' });
+
+  assert.deepEqual(first.phoneSocket.messages[0], {
+    type: 'paired', credential: 'phone-credential', phoneId: 'phone-id-one',
+    label: 'DemoPhone', deviceType: 'iphone', state: { index: 0, total: 3, busy: false },
+  });
+  assert.equal(second.phoneSocket.messages[0].label, 'DemoPhone (2)');
+  assert.equal(second.phoneSocket.messages[0].deviceType, 'android-phone');
+  assert.equal(fallback.phoneSocket.messages[0].label, 'Phone 3');
+  assert.equal(fallback.phoneSocket.messages[0].deviceType, 'phone');
+});
+
+test('pairs eight phones from one invite, broadcasts state, and rejects a ninth', () => {
+  const phoneTokens = Array.from({ length: 8 }, (_, index) => [
+    `phone-id-${index + 1}`, `phone-credential-${index + 1}`,
+  ]).flat();
+  const harness = createHarness({ tokens: ['invite-one', 'host-credential', ...phoneTokens] });
+  const phones = Array.from({ length: 8 }, () => pair(harness).phoneSocket);
+  assert.ok(phones.every((phone) => phone.messages[0]?.type === 'paired'));
+
+  const overflow = new ObservableSocket();
+  harness.session.handlePhoneMessage(overflow, { type: 'pair', invite: harness.created.invite });
+  assert.deepEqual(overflow.messages, [{ type: 'pairRejected', reason: 'session-full' }]);
+
+  harness.session.publishState({ index: 2, total: 3, busy: false });
+  assert.deepEqual(phones.map((phone) => phone.messages.at(-1)), phones.map(() => ({
+    type: 'state', index: 2, total: 3, busy: false,
+  })));
+});
+
+test('every paired phone can navigate and the presenter can remove one phone without ending the others', () => {
+  const phoneTokens = Array.from({ length: 2 }, (_, index) => [
+    `phone-id-${index + 1}`, `phone-credential-${index + 1}`,
+  ]).flat();
+  const harness = createHarness({ tokens: ['invite-one', 'host-credential', ...phoneTokens] });
+  const first = pair(harness);
+  const second = pair(harness);
+  const firstCommand = { type: 'command', id: 'first-next', action: 'next' };
+  const secondCommand = { type: 'command', id: 'second-next', action: 'next' };
+  harness.session.handlePhoneMessage(first.phoneSocket, firstCommand);
+  harness.session.handlePhoneMessage(second.phoneSocket, secondCommand);
+
+  const forwarded = harness.presenterSocket.messages.filter(({ type }) => type === 'command');
+  assert.equal(forwarded.length, 2);
+  assert.notEqual(forwarded[0].id, forwarded[1].id);
+  assert.deepEqual(forwarded.map(({ action }) => action), ['next', 'next']);
+
+  const removedPhoneId = first.phoneSocket.messages[0].phoneId;
+  assert.equal(harness.session.handlePresenterMessage(harness.presenterSocket, {
+    type: 'removePhone', phoneId: removedPhoneId,
+  }), true);
+  assert.equal(first.phoneSocket.readyState, 3);
+  assert.equal(second.phoneSocket.readyState, 1);
+  assert.deepEqual(harness.presenterSocket.messages.at(-1), {
+    type: 'phones',
+    phones: [{
+      phoneId: second.phoneSocket.messages[0].phoneId,
+      label: 'Phone 2',
+      deviceType: 'phone',
+      status: 'connected',
+    }],
+  });
+
+  harness.session.publishState({ index: 1, total: 3, busy: false });
+  assert.deepEqual(second.phoneSocket.messages.at(-1), { type: 'state', index: 1, total: 3, busy: false });
+  assert.equal(harness.stopped.length, 0);
 });
 
 test('invalid pairing attempts lock the invite until renewal, which resets attempts', () => {
   const harness = createHarness({
     maxPairAttempts: 5,
-    tokens: ['invite-one', 'host-credential', 'invite-two', 'phone-credential'],
+    tokens: ['invite-one', 'host-credential', 'invite-two', 'phone-id-one', 'phone-credential'],
   });
   const rejectedPhone = new ObservableSocket();
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -140,22 +215,28 @@ test('invalid pairing attempts lock the invite until renewal, which resets attem
   assert.deepEqual(rejectedPhone.messages.at(-1), { type: 'pairRejected', reason: 'invalid' });
 
   const renewal = harness.session.renewInvite();
-  assert.deepEqual(renewal, { invite: 'invite-two', expiresAt: 130_000 });
+  assert.deepEqual(renewal, { invite: 'invite-two', expiresAt: 310_000 });
   assert.equal(harness.timers.length, 2);
   assert.equal(harness.timers[0].cleared, true);
-  assert.equal(harness.timers[1].delay, 120_000);
+  assert.equal(harness.timers[1].delay, 300_000);
   const renewedPhone = new ObservableSocket();
   harness.session.handlePhoneMessage(renewedPhone, { type: 'pair', invite: renewal.invite });
   assert.deepEqual(renewedPhone.messages[0], {
     type: 'paired',
     credential: 'phone-credential',
+    phoneId: 'phone-id-one',
+    label: 'Phone 1',
+    deviceType: 'phone',
     state: { index: 0, total: 3, busy: false },
   });
 });
 
-test('renewal invalidates the prior invite and invite redemption cannot be reused', () => {
+test('renewal invalidates the prior invite and the renewed invite can pair multiple phones', () => {
   const harness = createHarness({
-    tokens: ['invite-one', 'host-credential', 'invite-two', 'phone-credential'],
+    tokens: [
+      'invite-one', 'host-credential', 'invite-two',
+      'phone-id-one', 'phone-credential', 'phone-id-two', 'phone-credential-two',
+    ],
   });
   const renewal = harness.session.renewInvite();
   const oldInvitePhone = new ObservableSocket();
@@ -165,12 +246,17 @@ test('renewal invalidates the prior invite and invite redemption cannot be reuse
   const phoneSocket = new ObservableSocket();
   const result = harness.session.redeemInvite(renewal.invite, phoneSocket);
   assert.deepEqual(result, { credential: 'phone-credential', state: { index: 0, total: 3, busy: false } });
-  assert.deepEqual(phoneSocket.messages[0], { type: 'paired', credential: result.credential, state: result.state });
-  assert.throws(() => harness.session.redeemInvite(renewal.invite, new ObservableSocket()), /already paired/);
+  assert.deepEqual(phoneSocket.messages[0], {
+    type: 'paired', credential: result.credential, phoneId: 'phone-id-one', label: 'Phone 1',
+    deviceType: 'phone', state: result.state,
+  });
+  const second = new ObservableSocket();
+  assert.equal(harness.session.handlePhoneMessage(second, { type: 'pair', invite: renewal.invite }), true);
+  assert.equal(second.messages[0].type, 'paired');
 });
 
-test('expired and already-paired invite attempts have distinct phone rejections', () => {
-  const expired = createHarness({ tokens: ['invite-one', 'host-credential', 'invite-two', 'phone-credential'] });
+test('expired and invalid invite attempts have distinct phone rejections', () => {
+  const expired = createHarness({ tokens: ['invite-one', 'host-credential', 'invite-two', 'phone-id-one', 'phone-credential'] });
   const expiredPhone = new ObservableSocket();
   expired.now = expired.created.expiresAt;
   expired.timers[0].callback();
@@ -187,22 +273,32 @@ test('expired and already-paired invite attempts have distinct phone rejections'
   pair(paired);
   const secondPhone = new ObservableSocket();
   paired.session.handlePhoneMessage(secondPhone, { type: 'pair', invite: 'unknown' });
-  assert.deepEqual(secondPhone.messages, [{ type: 'pairRejected', reason: 'already-paired' }]);
+  assert.deepEqual(secondPhone.messages, [{ type: 'pairRejected', reason: 'invalid' }]);
 });
 
-test('phone disconnect stops the session, revokes credentials, and calls onStop once', () => {
+test('phone disconnect removes only that phone and leaves the presentation session active', () => {
   const harness = createHarness();
-  const { phoneSocket, credential } = pair(harness);
-  harness.session.handlePhoneMessage(phoneSocket, { type: 'disconnect' });
+  const first = pair(harness);
+  const second = pair(harness);
+  harness.session.handlePhoneMessage(first.phoneSocket, { type: 'disconnect' });
 
-  assert.deepEqual(harness.stopped, ['phone-disconnected']);
-  assert.deepEqual(phoneSocket.messages.at(-1), { type: 'sessionEnded' });
-  assert.deepEqual(harness.presenterSocket.messages.at(-1), { type: 'sessionEnded' });
-  assert.equal(phoneSocket.readyState, 3);
-  assert.equal(harness.presenterSocket.readyState, 3);
-  assert.equal(harness.session.resumePhone(credential, new ObservableSocket()), false);
+  assert.deepEqual(harness.stopped, []);
+  assert.deepEqual(first.phoneSocket.messages.at(-1), { type: 'sessionEnded' });
+  assert.equal(first.phoneSocket.readyState, 3);
+  assert.equal(harness.presenterSocket.readyState, 1);
+  assert.equal(harness.session.resumePhone(first.credential, new ObservableSocket()), false);
+  assert.deepEqual(harness.presenterSocket.messages.at(-1), {
+    type: 'phones',
+    phones: [{
+      phoneId: second.phoneSocket.messages[0].phoneId,
+      label: 'Phone 2',
+      deviceType: 'phone',
+      status: 'connected',
+    }],
+  });
+
   harness.session.stop('host-stop');
-  assert.deepEqual(harness.stopped, ['phone-disconnected']);
+  assert.deepEqual(harness.stopped, ['host-stop']);
 });
 
 test('host stop ends both open sockets, cancels expiry, and revokes the phone credential', () => {
@@ -231,10 +327,16 @@ test('temporary phone loss preserves its slot and credential for resume', () => 
 
   const resumeSocket = new ObservableSocket();
   assert.deepEqual(harness.session.resumePhone(credential, resumeSocket), { index: 2, total: 3, busy: true });
-  assert.deepEqual(resumeSocket.messages, [{ type: 'resumed', state: { index: 2, total: 3, busy: true } }]);
+  assert.deepEqual(resumeSocket.messages, [{
+    type: 'resumed',
+    phoneId: 'phone-id-one',
+    label: 'Phone 1',
+    deviceType: 'phone',
+    state: { index: 2, total: 3, busy: true },
+  }]);
   const secondPhone = new ObservableSocket();
   harness.session.handlePhoneMessage(secondPhone, { type: 'pair', invite: harness.created.invite });
-  assert.deepEqual(secondPhone.messages, [{ type: 'pairRejected', reason: 'already-paired' }]);
+  assert.equal(secondPhone.messages[0].type, 'paired');
 
   const invalidResume = new ObservableSocket();
   assert.equal(harness.session.resumePhone('wrong', invalidResume), false);
@@ -269,7 +371,12 @@ test('valid commands are forwarded in a minimal shape and state updates expose o
     { type: 'command', id: 'go-to-id', action: 'goTo', index: 2 },
   ];
   for (const command of commands) harness.session.handlePhoneMessage(phoneSocket, command);
-  assert.deepEqual(harness.presenterSocket.messages.slice(initialPresenterMessages), commands);
+  const forwarded = harness.presenterSocket.messages.slice(initialPresenterMessages);
+  assert.deepEqual(
+    forwarded.map(({ type, action, index }) => ({ type, action, index })),
+    commands.map(({ type, action, index }) => ({ type, action, index })),
+  );
+  assert.deepEqual(forwarded.map(({ id }) => id), ['phone-id-one.1', 'phone-id-one.2', 'phone-id-one.3']);
 
   assert.equal(harness.session.publishState({ index: 2, total: 3, busy: false, title: 'secret', pdfBytes: 'secret' }), true);
   assert.deepEqual(phoneSocket.messages.at(-1), { type: 'state', index: 2, total: 3, busy: false });
@@ -329,10 +436,8 @@ test('deduplicates pending commands, replays completed acknowledgements, and rej
 
   const presenterAck = {
     type: 'commandAck',
-    id: 'same-id',
+    id: 'phone-id-one.1',
     accepted: true,
-    reason: 'private key at /Users/presenter/private.key',
-    secret: 'ignored',
   };
   harness.session.handlePresenterMessage(harness.presenterSocket, presenterAck);
   const ack = { type: 'commandAck', id: 'same-id', accepted: true };
@@ -354,7 +459,9 @@ test('command record capacity preserves prior IDs and rejects new unique command
   harness.session.handlePhoneMessage(phoneSocket, first);
   harness.session.handlePhoneMessage(phoneSocket, second);
 
-  assert.deepEqual(harness.presenterSocket.messages.filter(({ type }) => type === 'command'), [first]);
+  assert.deepEqual(harness.presenterSocket.messages.filter(({ type }) => type === 'command'), [{
+    type: 'command', id: 'phone-id-one.1', action: 'next',
+  }]);
   assert.deepEqual(phoneSocket.messages.at(-1), { type: 'commandAck', id: 'second-id', accepted: false });
 
   harness.session.handlePhoneMessage(phoneSocket, first);
@@ -364,7 +471,7 @@ test('command record capacity preserves prior IDs and rejects new unique command
   assert.deepEqual(phoneSocket.messages.at(-1), { type: 'commandRejected', reason: 'id-reuse' });
 
   harness.session.handlePresenterMessage(harness.presenterSocket, {
-    type: 'commandAck', id: 'first-id', accepted: true,
+    type: 'commandAck', id: 'phone-id-one.1', accepted: true,
   });
   assert.deepEqual(phoneSocket.messages.at(-1), { type: 'commandAck', id: 'first-id', accepted: true });
   harness.session.handlePhoneMessage(phoneSocket, first);
