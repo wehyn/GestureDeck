@@ -96,7 +96,7 @@ if (value.target === 'canva') {
 
 - [ ] **Step 2: Extend production Redis state validation.**
 
-Apply the same Canva shape and normalization in `src/cloud-remote-redis-server.js`'s `sanitizeState(value)`. Keep the current deck/PDF state behavior unchanged so both the HTTP start body and presenter state messages continue to validate.
+Apply the same Canva shape and normalization in `src/cloud-remote-redis-server.js`'s `sanitizeState(value)`. Keep the current deck/PDF state behavior unchanged so both the HTTP start body and presenter state messages continue to validate. Update `UPDATE_STATE_SCRIPT` to publish a `{ type: 'state' }` message containing every field from the normalized state, following the existing `PRESENTER_AUTH_SCRIPT` pattern. This keeps `target` and `ready` intact for phones when Canva readiness changes, while deck/PDF messages retain their current fields.
 
 - [ ] **Step 3: Reject `goTo` for Canva before slide-bound checks.**
 
