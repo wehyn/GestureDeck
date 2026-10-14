@@ -1,6 +1,9 @@
 const PHONE_PATH = '/ws/mobile-remote/phone';
 const CREDENTIAL_KEY = 'phoneSessionCredential';
+const LABEL_KEY = 'phoneSessionLabel';
 const RETRY_DELAYS = [250, 500, 1_000, 2_000, 4_000, 5_000];
+const DEVICE_TYPES = new Set(['iphone', 'android-phone', 'phone']);
+const PHONE_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -26,10 +29,29 @@ function sanitizeState(value) {
   return { index: value.index, total: value.total, busy: value.busy };
 }
 
+function validPhoneIdentity(message) {
+  return typeof message.phoneId === 'string'
+    && PHONE_ID_PATTERN.test(message.phoneId)
+    && typeof message.label === 'string'
+    && message.label.length > 0
+    && message.label.length <= 64
+    // eslint-disable-next-line no-control-regex -- Labels arrive from the pairing server and must not contain controls.
+    && !/[\u0000-\u001f\u007f-\u009f]/.test(message.label)
+    && DEVICE_TYPES.has(message.deviceType);
+}
+
+function detectDeviceType(userAgent) {
+  const value = typeof userAgent === 'string' ? userAgent : '';
+  if (/iPhone|iPod/i.test(value)) return 'iphone';
+  if (/Android/i.test(value) && /Mobile/i.test(value)) return 'android-phone';
+  return 'phone';
+}
+
 const PAIR_ERRORS = {
   expired: 'This pairing link has expired. Ask the presenter for a fresh link.',
   invalid: 'This pairing link is invalid. Scan a fresh QR code or open the latest link.',
-  'already-paired': 'Another phone is already paired. Disconnect it before pairing this phone.',
+  'already-paired': 'This hosted presentation already has a phone connected. Disconnect it before pairing another phone.',
+  'session-full': 'This presentation already has eight phones. Try again after someone disconnects a phone.',
   'host-unavailable': 'GestureDeck is not ready to pair. Ask the presenter to reconnect the remote.',
 };
 
@@ -40,10 +62,24 @@ export function mountMobileRemotePhone({
   history = globalThis.history,
   sessionStorage: providedSessionStorage,
   WebSocketImpl = globalThis.WebSocket,
+  navigatorImpl = globalThis.navigator,
 } = {}) {
   if (!document || !location || !history || typeof WebSocketImpl !== 'function') {
     throw new TypeError('Phone remote browser APIs are unavailable');
   }
+
+  const search = new URLSearchParams(location.search ?? '');
+  const routeSessionId = (location.pathname ?? '').match(/^\/r\/([A-Za-z0-9_-]{16})$/)?.[1] ?? null;
+  const sessionParameter = search.get('session') ?? routeSessionId;
+  const cloudSessionId = typeof sessionParameter === 'string' && /^[A-Za-z0-9_-]{16}$/.test(sessionParameter)
+    ? sessionParameter
+    : null;
+  const invalidCloudSession = (search.has('session') || (location.pathname ?? '').startsWith('/r/')) && !cloudSessionId;
+  const phonePath = cloudSessionId
+    ? `/api/cloud-remote-ws?__gd_route=phone&session=${encodeURIComponent(cloudSessionId)}`
+    : PHONE_PATH;
+  const credentialKey = cloudSessionId ? `${CREDENTIAL_KEY}:${cloudSessionId}` : CREDENTIAL_KEY;
+  const labelKey = cloudSessionId ? `${LABEL_KEY}:${cloudSessionId}` : LABEL_KEY;
 
   const statusElement = document.getElementById('connection-status');
   const targetLabel = document.getElementById('target-label');
@@ -54,8 +90,13 @@ export function mountMobileRemotePhone({
   const goButton = document.getElementById('go-button');
   const jumpPanel = document.getElementById('jump-panel');
   const disconnectButton = document.getElementById('disconnect-button');
+  const pairingPanel = document.getElementById('pairing-panel');
+  const nicknameField = document.getElementById('device-nickname-field');
+  const nicknameInput = document.getElementById('device-nickname');
+  const connectButton = document.getElementById('connect-button');
+  const connectedAsElement = document.getElementById('connected-as');
   const actionStatus = document.getElementById('action-status');
-  const elements = [statusElement, targetLabel, positionElement, previousButton, nextButton, slideNumber, goButton, jumpPanel, disconnectButton, actionStatus];
+  const elements = [statusElement, targetLabel, positionElement, previousButton, nextButton, slideNumber, goButton, jumpPanel, disconnectButton, actionStatus, pairingPanel, nicknameField, nicknameInput, connectButton, connectedAsElement];
   if (elements.some((element) => !element)) throw new TypeError('Phone remote page is missing required controls');
 
   const timerHost = document.defaultView ?? globalThis;
@@ -73,16 +114,21 @@ export function mountMobileRemotePhone({
 
   let sessionStorage;
   let credential = null;
+  let rememberedLabel = null;
   let storageUnavailable = false;
   try {
     sessionStorage = providedSessionStorage ?? globalThis.sessionStorage;
     if (!sessionStorage || typeof sessionStorage.getItem !== 'function') throw new TypeError('Session storage is unavailable');
-    credential = sessionStorage.getItem(CREDENTIAL_KEY);
+    credential = sessionStorage.getItem(credentialKey);
+    rememberedLabel = sessionStorage.getItem(labelKey);
   } catch {
     storageUnavailable = true;
     credential = null;
   }
   if (typeof credential !== 'string' || credential.length === 0) credential = null;
+  if (typeof rememberedLabel !== 'string' || rememberedLabel.length === 0 || rememberedLabel.length > 64
+    // eslint-disable-next-line no-control-regex -- Validate the remembered display label before rendering it.
+    || /[\u0000-\u001f\u007f-\u009f]/.test(rememberedLabel)) rememberedLabel = null;
   let invite = readInvite(location.hash);
   let socket;
   let retryTimer;
@@ -91,6 +137,12 @@ export function mountMobileRemotePhone({
   let ready = false;
   let terminal = false;
   let explicitlyDisconnected = false;
+  let pairingInProgress = false;
+  let pairAfterOpen = false;
+  let pairRejected = false;
+  let disconnectRequested = false;
+  let pendingNickname = '';
+  let connectedLabel = rememberedLabel;
   const pendingCommands = new Set();
 
   function setStatus(message, state = 'connecting', reason) {
@@ -99,6 +151,30 @@ export function mountMobileRemotePhone({
     if (reason) statusElement.dataset.reason = reason;
     else delete statusElement.dataset.reason;
   }
+
+  function setConnectedAs(label) {
+    if (typeof label !== 'string' || label.length < 1 || label.length > 64) return false;
+    connectedLabel = label;
+    connectedAsElement.textContent = `Connected as ${label}`;
+    connectedAsElement.hidden = false;
+    try { sessionStorage.setItem(labelKey, label); } catch { /* The live session still has its server-assigned label. */ }
+    return true;
+  }
+
+  function clearConnectedAs() {
+    connectedLabel = null;
+    connectedAsElement.textContent = '';
+    connectedAsElement.hidden = true;
+    try { sessionStorage.removeItem(labelKey); } catch { /* Storage can be unavailable in private modes. */ }
+  }
+
+  function renderPairingPanel() {
+    pairingPanel.hidden = Boolean(credential || ready || !invite);
+    connectButton.disabled = terminal || ready || pairingInProgress || Boolean(credential);
+  }
+
+  if (credential && connectedLabel) setConnectedAs(connectedLabel);
+  else if (!credential && connectedLabel) clearConnectedAs();
 
   function showRecovery(message, reason) {
     ready = false;
@@ -118,7 +194,8 @@ export function mountMobileRemotePhone({
     nextButton.disabled = !canNavigate || (!canvaTarget && currentState.index >= currentState.total - 1);
     slideNumber.disabled = !canNavigate || canvaTarget;
     goButton.disabled = !canNavigate || canvaTarget;
-    disconnectButton.disabled = terminal || explicitlyDisconnected || !(credential || ready);
+    disconnectButton.disabled = terminal || explicitlyDisconnected || disconnectRequested || !(credential || ready);
+    renderPairingPanel();
     if (canvaTarget) {
       positionElement.textContent = 'Canva presentation';
       slideNumber.value = '';
@@ -165,7 +242,8 @@ export function mountMobileRemotePhone({
 
   function clearCredential() {
     credential = null;
-    try { sessionStorage.removeItem(CREDENTIAL_KEY); } catch { /* Storage can be unavailable in private modes. */ }
+    try { sessionStorage.removeItem(credentialKey); } catch { /* Storage can be unavailable in private modes. */ }
+    clearConnectedAs();
   }
 
   function clearInviteFragment() {
@@ -248,12 +326,17 @@ export function mountMobileRemotePhone({
     try { message = JSON.parse(event.data); } catch { return; }
     if (!isRecord(message)) return;
 
+    const hasPhoneIdentity = validPhoneIdentity(message);
+    const legacyCloudPair = cloudSessionId
+      && Object.keys(message).sort().join(',') === 'credential,state,type'
+      && typeof message.credential === 'string' && message.credential.length > 0;
     if (message.type === 'paired'
       && typeof message.credential === 'string' && message.credential.length > 0
+      && (hasPhoneIdentity || legacyCloudPair)
       && updateState(message.state)) {
       credential = message.credential;
       try {
-        sessionStorage.setItem(CREDENTIAL_KEY, credential);
+        sessionStorage.setItem(credentialKey, credential);
       } catch {
         terminal = true;
         send({ type: 'disconnect' }, target);
@@ -263,6 +346,10 @@ export function mountMobileRemotePhone({
         target.close();
         return;
       }
+      if (hasPhoneIdentity) setConnectedAs(message.label);
+      pairingInProgress = false;
+      pairAfterOpen = false;
+      pairRejected = false;
       const inviteRemoved = clearInviteFragment();
       ready = true;
       retryAttempt = 0;
@@ -274,20 +361,32 @@ export function mountMobileRemotePhone({
       return;
     }
 
-    if (message.type === 'resumed' && credential && updateState(message.state)) {
+    const legacyCloudResume = cloudSessionId
+      && Object.keys(message).sort().join(',') === 'state,type';
+    if (message.type === 'resumed' && credential
+      && (hasPhoneIdentity || legacyCloudResume)
+      && updateState(message.state)) {
+      if (hasPhoneIdentity) setConnectedAs(message.label);
       ready = true;
       retryAttempt = 0;
       setStatus('Connected to presenter', 'connected');
       renderControls();
+      if (disconnectRequested && !finishDisconnect(target)) {
+        setStatus('Connection is unstable. Retrying the phone disconnect…', 'error');
+        target.close();
+      }
       return;
     }
 
     if (message.type === 'state' && ready && updateState(message)) return;
 
     if (message.type === 'pairRejected') {
-      terminal = true;
+      pairingInProgress = false;
+      pairAfterOpen = false;
+      pairRejected = true;
       const reason = typeof message.reason === 'string' ? message.reason : 'unknown';
       showRecovery(PAIR_ERRORS[reason] ?? 'Pairing was rejected. Ask the presenter for a fresh link.', reason);
+      renderControls();
       target.close();
       return;
     }
@@ -325,14 +424,18 @@ export function mountMobileRemotePhone({
     if (terminal || explicitlyDisconnected || socket && socket.readyState !== 3) return;
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     let nextSocket;
-    try { nextSocket = new WebSocketImpl(`${protocol}//${location.host}${PHONE_PATH}`); }
+    try { nextSocket = new WebSocketImpl(`${protocol}//${location.host}${phonePath}`); }
     catch {
       ready = false;
+      pairingInProgress = false;
+      pairAfterOpen = false;
       renderControls();
       if (credential) {
-        setStatus('Disconnected. Reconnecting…', 'error');
+        setStatus(disconnectRequested
+          ? 'Waiting for a connection to remove this phone…'
+          : 'Disconnected. Reconnecting…', 'error');
         scheduleRetry();
-      } else showRecovery('Could not connect. Scan a fresh pairing link and check the local Wi-Fi connection.', 'connection-failed');
+      } else showRecovery('Could not connect. Check the local Wi-Fi connection, then tap Connect to try again.', 'connection-failed');
       return;
     }
     socket = nextSocket;
@@ -342,7 +445,15 @@ export function mountMobileRemotePhone({
     nextSocket.onopen = () => {
       if (socket !== nextSocket || terminal || explicitlyDisconnected) return;
       if (credential) send({ type: 'resume', credential }, nextSocket);
-      else if (invite) send({ type: 'pair', invite }, nextSocket);
+      else if (invite && pairAfterOpen) {
+        pairAfterOpen = false;
+        send({
+          type: 'pair',
+          invite,
+          nickname: pendingNickname,
+          deviceType: detectDeviceType(navigatorImpl?.userAgent),
+        }, nextSocket);
+      }
       else {
         terminal = true;
         showRecovery('Pairing link missing. Scan a fresh QR code or open a new link from the presenter.', 'missing-invite');
@@ -353,22 +464,43 @@ export function mountMobileRemotePhone({
     nextSocket.onclose = () => {
       if (socket === nextSocket) socket = undefined;
       ready = false;
+      if (!credential) {
+        pairingInProgress = false;
+        pairAfterOpen = false;
+      }
       renderControls();
       if (terminal || explicitlyDisconnected) return;
+      if (pairRejected) return;
       pendingCommands.clear();
       if (credential) {
-        setStatus('Disconnected. Reconnecting…', 'error');
+        setStatus(disconnectRequested
+          ? 'Waiting for a connection to remove this phone…'
+          : 'Disconnected. Reconnecting…', 'error');
         scheduleRetry();
-      } else showRecovery('Connection closed. Open a fresh pairing link from the presenter to try again.', 'connection-closed');
+      } else showRecovery('Connection closed. Check the Wi-Fi connection, then tap Connect to try again.', 'connection-closed');
     };
   }
 
   function disconnect() {
-    if (terminal || explicitlyDisconnected) return;
+    if (terminal || explicitlyDisconnected || disconnectRequested) return;
+    clearRetry();
+    if (ready && isOpen()) {
+      if (!finishDisconnect(socket)) {
+        disconnectRequested = true;
+        setStatus('Connection is unstable. Retrying the phone disconnect…', 'error');
+        socket?.close();
+      }
+      return;
+    }
+    if (credential) {
+      disconnectRequested = true;
+      setStatus('Waiting for a connection to remove this phone…');
+      renderControls();
+      connect();
+      return;
+    }
     explicitlyDisconnected = true;
     terminal = true;
-    clearRetry();
-    if (isOpen()) send({ type: 'disconnect' });
     clearCredential();
     ready = false;
     renderControls();
@@ -376,6 +508,33 @@ export function mountMobileRemotePhone({
     actionStatus.textContent = 'This phone will not reconnect automatically.';
     socket?.close();
   }
+
+  function finishDisconnect(target) {
+    if (!send({ type: 'disconnect' }, target)) return false;
+    disconnectRequested = false;
+    explicitlyDisconnected = true;
+    terminal = true;
+    clearRetry();
+    clearCredential();
+    ready = false;
+    renderControls();
+    setStatus('Disconnected from presenter', 'disconnected');
+    actionStatus.textContent = 'This phone will not reconnect automatically.';
+    target?.close();
+    return true;
+  }
+
+  connectButton.addEventListener('click', () => {
+    if (terminal || credential || !invite || pairingInProgress) return;
+    // eslint-disable-next-line no-control-regex -- Strip control characters before sending the optional nickname.
+    pendingNickname = String(nicknameInput.value ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, '').replace(/\s+/g, ' ').trim();
+    pairingInProgress = true;
+    pairAfterOpen = true;
+    pairRejected = false;
+    setStatus('Opening the presenter connection…');
+    renderControls();
+    connect();
+  });
 
   previousButton.addEventListener('click', () => sendNavigation('previous'));
   nextButton.addEventListener('click', () => sendNavigation('next'));
@@ -397,12 +556,15 @@ export function mountMobileRemotePhone({
   } else if (storageUnavailable) {
     terminal = true;
     showRecovery('Browser session storage is unavailable. Enable storage for this tab, then reopen the pairing link.', 'storage-unavailable');
+  } else if (invalidCloudSession) {
+    terminal = true;
+    showRecovery('This pairing link is invalid. Ask the presenter for a fresh link.', 'invalid-link');
   } else if (!invite) {
     terminal = true;
     showRecovery('Pairing link missing. Scan a fresh QR code or open a new link from the presenter.', 'missing-invite');
   } else {
-    setStatus('Connecting to presenter…');
-    connect();
+    setStatus('Ready to connect', 'connecting');
+    renderControls();
   }
 
   return {

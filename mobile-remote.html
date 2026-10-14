@@ -13,7 +13,7 @@
       <header class="masthead">
         <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
         <div>
-          <p class="eyebrow">GESTUREDECK <span>·</span> LOCAL REMOTE</p>
+          <p class="eyebrow">GESTUREDECK <span>·</span> PHONE REMOTE</p>
           <h1 id="remote-title">Slide control</h1>
         </div>
       </header>
@@ -22,6 +22,19 @@
         <span class="connection-light" aria-hidden="true"></span>
         <p id="connection-status" class="connection-copy" role="status" aria-live="polite">Connecting to presenter…</p>
       </section>
+
+      <section id="pairing-panel" class="pairing-panel" aria-labelledby="pairing-heading">
+        <p class="position-label">JOIN THIS PRESENTATION</p>
+        <h2 id="pairing-heading">Connect your phone</h2>
+        <div id="device-nickname-field">
+          <label for="device-nickname">Name on the presenter’s phone list <span>(optional)</span></label>
+          <input id="device-nickname" name="device-nickname" type="text" maxlength="32" autocomplete="nickname" autocapitalize="words" placeholder="For example, Alex’s phone" aria-describedby="nickname-help">
+          <p id="nickname-help" class="pairing-help">Leave it blank to use a device label. It appears in the presenter list and on this phone after connection.</p>
+        </div>
+        <button id="connect-button" class="connect-button" type="button">Connect</button>
+      </section>
+
+      <p id="connected-as" class="connected-as" role="status" aria-live="polite" hidden></p>
 
       <section class="controller" aria-label="Presentation controls">
         <div class="position-block" aria-live="polite">
@@ -52,7 +65,7 @@
       <p id="action-status" class="action-status" role="status" aria-live="polite"></p>
 
       <footer class="footer">
-        <p>Local control · use a trusted Wi-Fi network.</p>
+        <p>Private link · slide controls only.</p>
         <button id="disconnect-button" class="disconnect-button" type="button">Disconnect</button>
       </footer>
     </main>

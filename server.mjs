@@ -3,12 +3,14 @@ import { createReadStream } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { attachMobileRemote, isLocalPresenterHost, listPrivateInterfaces } from './src/mobile-remote-server.js';
+import { attachMobileRemote, listPrivateInterfaces } from './src/mobile-remote-server.js';
 import { DEFAULT_CONTROLLER_PORT } from './extension/shared/protocol.js';
+import { attachCloudRemote } from './src/cloud-remote-server.js';
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 const publicRootFiles = new Set([
-  'index.html', 'app.js', 'styles.css', 'favicon.svg',
+  'index.html', 'workspace.html', 'app.js', 'styles.css', 'home.css',
+  'mobile-remote.html', 'mobile-remote.css', 'favicon.svg',
   'extension/shared/protocol.js', 'extension/shared/page-bridge.js',
 ]);
 const publicDirectories = [
@@ -76,6 +78,8 @@ export function createAppServer({ root = projectRoot, host = '0.0.0.0' } = {}) {
     }
 
     if (pathname === '/') pathname = '/index.html';
+    if (pathname === '/remote') pathname = '/mobile-remote.html';
+    if (/^\/r\/[A-Za-z0-9_-]{16}$/.test(pathname)) pathname = '/mobile-remote.html';
     const filePath = path.resolve(resolvedRoot, `.${pathname}`);
     const relativePath = path.relative(resolvedRoot, filePath);
     if (relativePath === '..' || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) {
@@ -117,7 +121,7 @@ export function createAppServer({ root = projectRoot, host = '0.0.0.0' } = {}) {
         'cross-origin-opener-policy': 'same-origin',
         'cross-origin-embedder-policy': 'require-corp',
         'cross-origin-resource-policy': 'same-origin',
-        'content-security-policy': `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self' ws://${isLocalPresenterHost(request.headers.host, server.address()?.port) ? request.headers.host : `127.0.0.1:${server.address()?.port}`}/ws/mobile-remote/presenter; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'`,
+        'content-security-policy': `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self' ws: wss:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'`,
       });
       if (request.method === 'HEAD') {
         response.end();
@@ -134,6 +138,7 @@ export function createAppServer({ root = projectRoot, host = '0.0.0.0' } = {}) {
     }
   });
   server.mobileRemote = attachMobileRemote(server, { root: resolvedRoot });
+  server.cloudRemote = attachCloudRemote(server);
   return server;
 }
 
@@ -148,6 +153,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
 
   for (const signal of ['SIGINT', 'SIGTERM']) {
     process.on(signal, async () => {
+      await server.cloudRemote.close();
       await server.mobileRemote.close();
       server.close(() => process.exit(0));
     });

@@ -58,10 +58,9 @@ export function isLocalPresenterHost(host, port, interfaceProvider = os.networkI
 function isLocalPresenterRequest(request, port, interfaceProvider, requireOrigin) {
   const host = request.headers.host;
   const peer = normalizeAddress(request.socket.remoteAddress);
-  const peerIsLocalInterface = Object.values(interfaceProvider()).some((entries) =>
-    (entries ?? []).some((entry) => normalizeAddress(entry.address) === peer));
   const isLocalPeer = peer === '127.0.0.1' || peer === '::1'
-    || (isPrivateOrTailscale(peer) && peerIsLocalInterface);
+    || Object.values(interfaceProvider()).some((entries) =>
+      (entries ?? []).some((entry) => normalizeAddress(entry.address) === peer));
   if (!isLocalPeer || !isLocalPresenterHost(host, port, interfaceProvider)) return false;
   return request.headers.origin === `http://${host}`
     || (!requireOrigin && request.headers.origin === undefined);
@@ -184,6 +183,7 @@ export function attachMobileRemote(server, {
           authenticated = true;
           clearAuthTimeout(timer);
           socket.send({ type: 'presenterReady' });
+          session.publishPhoneList();
           return;
         }
         session?.handlePresenterMessage(socket, message);

@@ -10,9 +10,20 @@ import { SwipeRecognizer } from './src/gesture-engine.js';
 import { createCanvaExtensionBridge } from './extension/shared/page-bridge.js';
 
 const $ = (id) => document.getElementById(id);
+function isLocalNetworkHost(hostname) {
+  const host = String(hostname ?? '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host === '::1') return true;
+  const parts = host.split('.');
+  if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/.test(part) || Number(part) > 255)) return false;
+  const [first, second] = parts.map(Number);
+  return first === 10 || first === 127 || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 168) || (first === 100 && second >= 64 && second <= 127);
+}
+
+const cloudExperience = new URLSearchParams(globalThis.location?.search ?? '').get('experience') === 'cloud'
+  && !isLocalNetworkHost(globalThis.location?.hostname);
 const elements = {
   startSetup: $('start-setup'),
-  compactStartSetup: $('compact-start-setup'),
   startSession: $('start-session'),
   pauseSession: $('pause-session'),
   resumeSession: $('resume-session'),
@@ -20,6 +31,8 @@ const elements = {
   previousSlide: $('previous-slide'),
   nextSlide: $('next-slide'),
   cameraPreview: $('camera-preview'),
+  cameraCard: $('camera-card'),
+  statusList: $('status-list'),
   handOverlay: $('hand-overlay'),
   cameraDiagnostics: $('camera-diagnostics'),
   diagnosticStatusDot: $('diagnostic-status-dot'),
@@ -42,6 +55,7 @@ const elements = {
   cameraStatusBadge: $('camera-status-badge'),
   handStatus: $('hand-status'),
   sessionMessage: $('session-message'),
+  setupHint: $('setup-hint'),
   errorMessage: $('error-message'),
   slideNumber: $('slide-number'),
   slideCount: $('slide-count'),
@@ -66,6 +80,7 @@ const elements = {
   openPdf: $('open-pdf'),
   pdfFile: $('pdf-file'),
   sampleDeck: $('sample-deck'),
+  sampleDeckStatus: $('sample-deck-status'),
   enterPdfFullscreen: $('enter-pdf-fullscreen'),
   pdfFullscreenToolbar: $('pdf-fullscreen-toolbar'),
   fullscreenPrevious: $('fullscreen-previous'),
@@ -92,6 +107,10 @@ const elements = {
   pairingUrl: $('pairing-url'),
   copyPairingUrl: $('copy-pairing-url'),
   pairingStatus: $('pairing-status'),
+  pairedPhonesPanel: $('paired-phones-panel'),
+  pairedPhones: $('paired-phones'),
+  pairedPhonesEmpty: $('paired-phones-empty'),
+  pairedPhoneCount: $('paired-phone-count'),
   newPairingLink: $('new-pairing-link'),
   disconnectPhone: $('disconnect-phone'),
   closePairingDialog: $('close-pairing-dialog'),
@@ -138,7 +157,10 @@ let remoteStarting = false;
 let remoteAuthenticated = false;
 let remoteGeneration = 0;
 let remoteStopPromise = null;
+let cloudRemoteSession = null;
 let closingMobileRemote = false;
+let pairedPhones = [];
+let pairingInviteExpired = false;
 let pageIsHiding = false;
 let canvaTarget = { connected: false, ready: false };
 let phoneRemoteTarget = null;
@@ -243,11 +265,14 @@ function setMode(mode, message) {
   })[mode] ?? 'IDLE');
   const isIdle = mode === 'idle' || mode === 'error';
   show(elements.startSetup, isIdle);
-  show(elements.compactStartSetup, isIdle);
   show(elements.startSession, mode === 'setup');
   show(elements.pauseSession, mode === 'live');
   show(elements.resumeSession, mode === 'paused');
   show(elements.stopSession, ['starting', 'setup', 'live', 'paused'].includes(mode));
+  show(elements.cameraCard, mode !== 'idle');
+  show(elements.statusList, mode !== 'idle');
+  show(elements.sessionMessage, mode !== 'idle');
+  show(elements.setupHint, mode === 'idle');
   show(elements.cameraPicker, state.cameraChoicesAvailable && ['setup', 'error'].includes(mode));
   if (elements.startSession) elements.startSession.disabled = state.setupGestures.size < 2;
 
@@ -268,17 +293,17 @@ export function renderCameraState(cameraState) {
   if (cameraState === 'active') {
     setText(elements.cameraStatus, 'Camera on · Local processing');
     setText(elements.cameraStatusDetail, 'On · local only');
-    setText(elements.cameraStatusCopy, 'Frames stay on this device. No video is saved or uploaded.');
+    setText(elements.cameraStatusCopy, 'On-device only.');
     setText(elements.cameraStatusBadge, 'ON');
   } else if (cameraState === 'starting') {
     setText(elements.cameraStatus, 'Requesting camera access…');
     setText(elements.cameraStatusDetail, 'Starting');
-    setText(elements.cameraStatusCopy, 'Waiting for camera permission.');
+    setText(elements.cameraStatusCopy, 'Waiting for permission.');
     setText(elements.cameraStatusBadge, 'WAIT');
   } else {
     setText(elements.cameraStatus, 'Camera off');
+    setText(elements.cameraStatusCopy, 'Starts when you begin setup.');
     setText(elements.cameraStatusDetail, 'Off');
-    setText(elements.cameraStatusCopy, 'Nothing is being captured.');
     setText(elements.cameraStatusBadge, 'OFF');
   }
 }
@@ -486,9 +511,12 @@ function renderSourceUi() {
   show(elements.sampleCanvasContent, !pdfActive);
   show(elements.sampleCanvasFooter, !pdfActive);
   show(elements.pdfStage, pdfActive);
-  show(elements.sampleDeck, pdfActive);
+  show(elements.sampleDeck, true);
+  elements.sampleDeck?.setAttribute('aria-pressed', String(!pdfActive));
+  if (elements.sampleDeck) elements.sampleDeck.dataset.selected = String(!pdfActive);
+  setText(elements.sampleDeckStatus, pdfActive ? 'Use sample deck' : 'Selected');
   show(elements.enterPdfFullscreen, pdfActive);
-  setText(elements.deckHeading, pdfActive ? state.pdfName : 'Field notes on presence');
+  setText(elements.deckHeading, pdfActive ? state.pdfName : cloudExperience ? 'Sample deck' : 'Field notes on presence');
   setText(elements.deckEyebrow, pdfActive ? 'YOUR PDF' : 'SAMPLE DECK');
   setText(elements.deckFormatLabel, pdfActive ? 'PDF · Local file' : 'Browser · Sample deck');
   renderTargetStatus();
@@ -638,10 +666,10 @@ function handleRemoteCommand(command) {
 }
 
 /** Connect after /api/mobile-remote/start returns its hostCredential. */
-export function connectMobileRemote({ hostCredential, WebSocketImpl, onConnection } = {}) {
+export function connectMobileRemote({ hostCredential, WebSocketImpl, onConnection, path } = {}) {
   mobileRemoteClient?.close();
   mobileRemoteClient = createMobileRemoteClient({
-    hostCredential, WebSocketImpl, onConnection,
+    hostCredential, WebSocketImpl, onConnection, path,
     onCommand: handleRemoteCommand,
     location: window.location,
   });
@@ -664,13 +692,86 @@ async function requestMobileRemote(path, { method = 'GET', body, keepalive = fal
   return payload;
 }
 
+async function requestCloudRemote(path, { method = 'POST', body, keepalive = false } = {}) {
+  const options = { method, headers: {} };
+  if (body !== undefined) {
+    options.headers['content-type'] = 'application/json';
+    options.body = JSON.stringify(body);
+  }
+  if (keepalive) options.keepalive = true;
+  const response = await fetch(`/api/cloud-remote/${path}`, options);
+  let payload = {};
+  try { payload = await response.json(); } catch { /* Report a stable fallback below. */ }
+  if (!response.ok) throw new Error(payload.error || `Request failed (${response.status || 'unknown'})`);
+  return payload;
+}
+
 function setPairingStatus(message) {
   setText(elements.pairingStatus, message);
 }
 
+function displayPhoneType(deviceType) {
+  return ({ iphone: 'iPhone', 'android-phone': 'Android phone', phone: 'Phone' })[deviceType] ?? 'Phone';
+}
+
+function renderPairedPhones(phones) {
+  pairedPhones = Array.isArray(phones) ? phones : [];
+  if (!elements.pairedPhones || typeof document.createElement !== 'function') return;
+
+  const rows = pairedPhones.map((phone) => {
+    const row = document.createElement('li');
+    row.className = 'paired-phone-row';
+
+    const info = document.createElement('div');
+    info.className = 'paired-phone-info';
+    const label = document.createElement('span');
+    label.className = 'paired-phone-label';
+    label.textContent = phone.label;
+    const type = document.createElement('span');
+    type.className = 'paired-phone-type';
+    type.textContent = displayPhoneType(phone.deviceType);
+    info.append(label, type);
+
+    const status = document.createElement('span');
+    status.className = 'paired-phone-status';
+    status.dataset.state = phone.status;
+    status.textContent = phone.status === 'connected' ? 'Connected' : 'Reconnecting';
+
+    const remove = document.createElement('button');
+    remove.className = 'paired-phone-remove';
+    remove.type = 'button';
+    remove.textContent = 'Disconnect';
+    remove.setAttribute('aria-label', `Disconnect ${phone.label}`);
+    remove.addEventListener('click', () => {
+      if (mobileRemoteClient?.removePhone(phone.phoneId)) {
+        setPairingStatus(`Disconnecting ${phone.label}…`);
+      }
+    });
+
+    row.append(info, status, remove);
+    return row;
+  });
+  elements.pairedPhones.replaceChildren(...rows);
+  setText(elements.pairedPhoneCount, `${pairedPhones.length} / 8`);
+  show(elements.pairedPhonesEmpty, pairedPhones.length === 0);
+  show(elements.pairedPhonesPanel, remoteActive && remoteAuthenticated);
+
+  if (pairingInviteExpired || !remoteAuthenticated) return;
+  if (pairedPhones.length === 0) {
+    setPairingStatus('Waiting for phones to connect. Share this same link with up to eight phones.');
+    return;
+  }
+  const connected = pairedPhones.filter((phone) => phone.status === 'connected').length;
+  const reconnecting = pairedPhones.length - connected;
+  const pairedText = `${pairedPhones.length} phone${pairedPhones.length === 1 ? '' : 's'} paired`;
+  const statusText = `${connected} connected${reconnecting ? ` · ${reconnecting} reconnecting` : ''}`;
+  setPairingStatus(`${pairedText} · ${statusText}`);
+}
+
 function updatePairingStartButton() {
   if (elements.startPhoneRemote) {
-    elements.startPhoneRemote.disabled = remoteStarting || remoteActive || !elements.pairingInterface?.value;
+    elements.startPhoneRemote.disabled = remoteStarting || remoteActive
+      || (!cloudExperience && !elements.pairingInterface?.value);
   }
 }
 
@@ -698,9 +799,11 @@ function resetPairingUi() {
   remoteStarting = false;
   remoteAuthenticated = false;
   phoneRemoteTarget = null;
+  pairingInviteExpired = false;
   clearPairingMaterial();
   show(elements.newPairingLink, false);
   show(elements.disconnectPhone, false);
+  renderPairedPhones([]);
   setPairingStatus('Disconnected');
   updatePairingStartButton();
   renderTargetStatus();
@@ -752,6 +855,15 @@ function openPairingDialog() {
   if (!elements.pairingDialog) return;
   pairingReturnFocus = document.activeElement ?? elements.connectPhone;
   if (!elements.pairingDialog.open) elements.pairingDialog.showModal();
+  if (cloudExperience) {
+    setText($('pairing-dialog-eyebrow'), 'PHONE REMOTE');
+    setText($('pairing-title'), 'Connect your phone');
+    setText($('pairing-description'), 'Scan the code with your phone. Your PDF stays in this browser; the phone receives slide controls only.');
+    setText(elements.startPhoneRemote, 'Create pairing link');
+    void startCloudMobileRemote();
+    elements.pairingStatus?.focus?.({ preventScroll: true });
+    return;
+  }
   elements.pairingInterface?.focus?.({ preventScroll: true });
   return loadPairingInterfaces();
 }
@@ -766,16 +878,24 @@ function handleMobileRemoteConnection(event, generation) {
   if (event.type === 'authenticated') {
     remoteAuthenticated = true;
     revealPairingMaterial();
+    setText(elements.newPairingLink, 'Renew pairing link');
+    show(elements.newPairingLink, true);
     setPairingStatus('Waiting for your phone to connect');
+    renderPairedPhones(pairedPhones);
     return;
   }
   if (event.type === 'phonePaired') {
-    setPairingStatus('Phone connected');
-    show(elements.newPairingLink, false);
+    setPairingStatus('Phone connected. The same link remains available to other phones.');
+    return;
+  }
+  if (event.type === 'phones') {
+    renderPairedPhones(event.phones);
     return;
   }
   if (event.type === 'inviteExpired') {
+    pairingInviteExpired = true;
     clearPairingMaterial();
+    setText(elements.newPairingLink, 'New pairing link');
     show(elements.newPairingLink, true);
     setPairingStatus('Pairing link expired. Create a new pairing link to continue.');
     return;
@@ -792,6 +912,7 @@ function handleMobileRemoteConnection(event, generation) {
 }
 
 async function startMobileRemote() {
+  if (cloudExperience) return startCloudMobileRemote();
   if (remoteActive || remoteStarting) return;
   const address = elements.pairingInterface?.value;
   if (!address) {
@@ -801,6 +922,8 @@ async function startMobileRemote() {
   const target = canvaTarget.connected ? 'canva' : 'local';
   const generation = ++remoteGeneration;
   remoteStarting = true;
+  pairedPhones = [];
+  pairingInviteExpired = false;
   updatePairingStartButton();
   if (elements.pairingInterface) elements.pairingInterface.disabled = true;
   show(elements.newPairingLink, false);
@@ -822,6 +945,7 @@ async function startMobileRemote() {
       throw new Error('The pairing service returned incomplete connection details.');
     }
     pendingPairingInvite = { qrDataUrl: result.qrDataUrl, fallbackUrl: result.fallbackUrl };
+    pairingInviteExpired = false;
     remoteStarting = false;
     remoteActive = true;
     phoneRemoteTarget = target;
@@ -856,22 +980,88 @@ async function startMobileRemote() {
   }
 }
 
+async function startCloudMobileRemote() {
+  if (!cloudExperience || remoteActive || remoteStarting) return;
+  const generation = ++remoteGeneration;
+  remoteStarting = true;
+  updatePairingStartButton();
+  show(elements.newPairingLink, false);
+  clearPairingMaterial();
+  setPairingStatus('Starting the phone connection…');
+  let startedSession;
+  try {
+    const result = await requestCloudRemote('start', { body: { state: remoteSnapshot() } });
+    if (typeof result.sessionId !== 'string' || !/^[A-Za-z0-9_-]{16}$/.test(result.sessionId)
+      || typeof result.hostCredential !== 'string' || !result.hostCredential) {
+      throw new Error('The pairing service returned incomplete connection details.');
+    }
+    startedSession = { sessionId: result.sessionId, hostCredential: result.hostCredential };
+    if (typeof result.qrDataUrl !== 'string' || typeof result.fallbackUrl !== 'string') {
+      throw new Error('The pairing service returned incomplete connection details.');
+    }
+    if (generation !== remoteGeneration) {
+      void requestCloudRemote('stop', { body: startedSession, keepalive: pageIsHiding }).catch(() => {});
+      return;
+    }
+    cloudRemoteSession = startedSession;
+    pendingPairingInvite = { qrDataUrl: result.qrDataUrl, fallbackUrl: result.fallbackUrl };
+    remoteStarting = false;
+    remoteActive = true;
+    show(elements.disconnectPhone, true);
+    updatePairingStartButton();
+    setPairingStatus('Waiting for the presenter connection…');
+    const path = `/api/cloud-remote-ws?__gd_route=presenter&session=${encodeURIComponent(result.sessionId)}`;
+    mobileRemoteClient = connectMobileRemote({
+      hostCredential: result.hostCredential,
+      path,
+      onConnection: (event) => handleMobileRemoteConnection(event, generation),
+    });
+  } catch (error) {
+    if (startedSession) {
+      void requestCloudRemote('stop', { body: startedSession, keepalive: pageIsHiding }).catch(() => {});
+    }
+    if (generation !== remoteGeneration) return;
+    remoteStarting = false;
+    remoteActive = false;
+    remoteAuthenticated = false;
+    cloudRemoteSession = null;
+    clearPairingMaterial();
+    show(elements.newPairingLink, false);
+    show(elements.disconnectPhone, false);
+    updatePairingStartButton();
+    const reason = error.message === 'https-required'
+      ? 'Open GestureDeck using its secure HTTPS link to connect your phone.'
+      : error.message === 'capacity-reached'
+        ? 'Phone sessions are busy right now. Try again in a little while.'
+        : error.message === 'relay-storage-unavailable'
+          ? 'Phone control is not available right now.'
+        : error.message;
+    setPairingStatus(`Could not start the phone connection. ${reason}`);
+  }
+}
+
 async function renewPairingInvite() {
   if (!remoteActive || !remoteAuthenticated) return;
   show(elements.newPairingLink, false);
   setPairingStatus('Creating a new pairing link…');
   const generation = remoteGeneration;
   try {
-    const result = await requestMobileRemote('renew-invite', { method: 'POST', body: {} });
+    const result = cloudExperience
+      ? await requestCloudRemote('renew-invite', { body: cloudRemoteSession })
+      : await requestMobileRemote('renew-invite', { method: 'POST', body: {} });
     if (generation !== remoteGeneration || !remoteActive || !remoteAuthenticated) return;
     if (typeof result.qrDataUrl !== 'string' || typeof result.fallbackUrl !== 'string') {
       throw new Error('The pairing service returned an incomplete pairing link.');
     }
     pendingPairingInvite = { qrDataUrl: result.qrDataUrl, fallbackUrl: result.fallbackUrl };
+    pairingInviteExpired = false;
+    setText(elements.newPairingLink, 'Renew pairing link');
     revealPairingMaterial();
-    setPairingStatus('Waiting for your phone to connect');
+    show(elements.newPairingLink, true);
+    renderPairedPhones(pairedPhones);
   } catch (error) {
     if (generation !== remoteGeneration) return;
+    setText(elements.newPairingLink, pairingInviteExpired ? 'New pairing link' : 'Renew pairing link');
     show(elements.newPairingLink, true);
     setPairingStatus(`Could not create a new pairing link. ${error.message}`);
   }
@@ -889,7 +1079,13 @@ async function stopMobileRemote({ keepalive = false, force = false } = {}) {
   if (elements.pairingInterface) elements.pairingInterface.disabled = false;
   resetPairingUi();
   if (!shouldPostStop) return;
-  remoteStopPromise = requestMobileRemote('stop', { method: 'POST', body: {}, keepalive })
+  const sessionToStop = cloudRemoteSession;
+  cloudRemoteSession = null;
+  remoteStopPromise = (cloudExperience
+    ? sessionToStop
+      ? requestCloudRemote('stop', { body: sessionToStop, keepalive })
+      : Promise.resolve()
+    : requestMobileRemote('stop', { method: 'POST', body: {}, keepalive }))
     .catch(() => {})
     .finally(() => { remoteStopPromise = null; });
   return remoteStopPromise;
@@ -1349,7 +1545,6 @@ function bindEvents() {
   elements.pdfFullscreenToolbar?.addEventListener('focusin', revealFullscreenToolbar);
   document.addEventListener('fullscreenchange', syncPdfFullscreen);
   elements.startSetup?.addEventListener('click', () => startCapture('setup'));
-  elements.compactStartSetup?.addEventListener('click', () => startCapture('setup'));
   elements.startSession?.addEventListener('click', () => {
     if (state.mode !== 'setup' || state.setupGestures.size < 2) return;
     state.previewVisible = defaultPreviewVisibility('live');
@@ -1430,6 +1625,15 @@ canvaExtensionBridge.subscribe(updateCanvaTarget);
 void canvaExtensionBridge.requestStatus().then(updateCanvaTarget);
 
 bindEvents();
+if (cloudExperience) {
+  document.documentElement.dataset.experience = 'cloud';
+  setText($('page-title'), 'Present with your phone.');
+  setText(document.querySelector('.welcome-description'), 'Choose a PDF, pair your phone, and present.');
+  setText(elements.connectPhone?.querySelector('.deck-choice-copy strong'), 'Connect phone');
+  setText(elements.connectPhone?.querySelector('.deck-choice-copy span'), 'Pair to this presentation');
+  setText($('pairing-dialog-eyebrow'), 'PHONE REMOTE');
+  setText(elements.startPhoneRemote, 'Create pairing link');
+}
 renderSlide();
 setMode('idle');
 renderGestureMapping();
