@@ -178,6 +178,9 @@ h1 {
   font-variant-numeric: tabular-nums;
 }
 
+#slide-position[hidden],
+#jump-panel[hidden] { display: none; }
+
 .transport-row {
   display: grid;
   grid-template-columns: 1fr 1fr;

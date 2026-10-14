@@ -25,7 +25,7 @@
 
       <section class="controller" aria-label="Presentation controls">
         <div class="position-block" aria-live="polite">
-          <span class="position-label">CURRENT SLIDE</span>
+          <span id="target-label" class="position-label">CURRENT SLIDE</span>
           <p id="slide-position" class="slide-position">— / —</p>
         </div>
 
@@ -40,7 +40,7 @@
           </button>
         </div>
 
-        <div class="jump-panel">
+        <div id="jump-panel" class="jump-panel">
           <label for="slide-number">Go to slide</label>
           <div class="jump-row">
             <input id="slide-number" name="slide-number" type="number" inputmode="numeric" min="1" step="1" placeholder="1" aria-label="Slide number" disabled>

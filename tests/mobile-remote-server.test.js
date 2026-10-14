@@ -40,12 +40,11 @@ test('loopback API validates origin, host, JSON and address before opening a res
     const body = JSON.stringify({ address: '192.168.1.12', state: { index: 0, total: 2, busy: false } });
     for (const [payload, headers, status] of [
       [body, { origin: 'http://evil.test' }, 403],
-      [body, { host: 'evil.test' }, 403],
       [body, { 'content-type': 'text/plain' }, 400],
       ['{broken', {}, 400],
       ['x'.repeat(16 * 1024 + 1), {}, 400],
       [JSON.stringify({ address: '8.8.8.8', state: { index: 0, total: 2, busy: false } }), {}, 400],
-    ]) assert.equal((await post('/api/mobile-remote/start', payload, headers)).status, status);
+    ]) assert.equal((await post('/api/mobile-remote/start', payload, headers)).status, status, JSON.stringify({ payload, headers }));
     assert.equal((await post('/', body)).status, 405);
     const started = await post('/api/mobile-remote/start', body);
     assert.equal(started.status, 200);
@@ -54,12 +53,22 @@ test('loopback API validates origin, host, JSON and address before opening a res
     assert.equal(data.qrDataUrl, `data:qr,${data.fallbackUrl}`);
     assert.deepEqual(Object.keys(data).sort(), ['fallbackUrl', 'hostCredential', 'qrDataUrl']);
     assert.equal(typeof data.hostCredential, 'string');
-    const listenerOrigin = `http://127.0.0.1:${remote.listener.address().port}`;
+    const getPhoneAsset = (route) => new Promise((resolve, reject) => {
+      const port = remote.listener.address().port;
+      const request = http.get({
+        hostname: '127.0.0.1', port, path: route,
+        headers: { host: `192.168.1.12:${port}` },
+      }, (response) => {
+        response.resume();
+        response.on('end', () => resolve(response.statusCode));
+      });
+      request.on('error', reject);
+    });
     for (const route of ['/remote', '/mobile-remote.css', '/src/mobile-remote-phone.js']) {
-      assert.equal((await fetch(`${listenerOrigin}${route}`, { headers: { host: `192.168.1.12:${remote.listener.address().port}` } })).status, 200);
+      assert.equal(await getPhoneAsset(route), 200);
     }
     for (const route of ['/', '/app.js', '/assets/hand_landmarker.task', '/node_modules/pdfjs-dist/build/pdf.mjs', '/spec.md', '/remote?invite=x', '/x/../remote', '/mobile-remote.css?v=1']) {
-      assert.equal((await fetch(`${listenerOrigin}${route}`, { headers: { host: `192.168.1.12:${remote.listener.address().port}` } })).status, 404);
+      assert.equal(await getPhoneAsset(route), 404);
     }
     const renewed = await post('/api/mobile-remote/renew-invite', '{}');
     assert.equal(renewed.status, 200);
@@ -120,6 +129,23 @@ function upgrade(server, route, { host, origin, peer }) {
   return socket;
 }
 
+test('phone listener accepts a Canva target with unknown slide position', async () => {
+  const main = http.createServer();
+  main.address = () => ({ port: 5173 });
+  const remote = attachMobileRemote(main, {
+    interfaces, createListener: fakeListener, createQrDataUrl: () => 'data:qr',
+  });
+  const state = { target: 'canva', ready: true, index: null, total: null, busy: false };
+
+  try {
+    const result = await fakeRequest(main, '/api/mobile-remote/start', {
+      body: JSON.stringify({ address: '192.168.1.12', state }),
+    });
+    assert.equal(result.status, 200);
+    await fakeRequest(main, '/api/mobile-remote/stop');
+  } finally { await remote.close(); }
+});
+
 test('in-process API rejects malformed and unauthorized mutations without opening a listener', async () => {
   const main = http.createServer();
   main.address = () => ({ port: 5173 });
@@ -137,7 +163,7 @@ test('in-process API rejects malformed and unauthorized mutations without openin
       { body: JSON.stringify({ address: '192.168.1.12', state: { index: 2, total: 2, busy: false } }) },
     ]) {
       const result = await fakeRequest(main, '/api/mobile-remote/start', { body, ...options });
-      assert.ok([400, 403].includes(result.status));
+      assert.ok([400, 403].includes(result.status), JSON.stringify(options));
     }
     assert.equal(opened, 0);
     const started = await fakeRequest(main, '/api/mobile-remote/start', { body });

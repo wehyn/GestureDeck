@@ -37,6 +37,7 @@ Camera frames and hand landmarks are not uploaded or saved. The camera is off un
 - Cloning or pushing this repository to GitHub.
 - The initial `npm install` when the required package is not already available in the local npm cache.
 - Publishing or viewing the demo video and LinkedIn post.
+- Opening and presenting a Canva design requires Canva's normal internet connection.
 
 After dependencies are installed, the sample deck, PDF import, and hand tracking can run offline. The hand model is included in this repository, and the MediaPipe and PDF.js runtimes are served locally; the app does not call a cloud inference API. PDF files and rendered pages are not uploaded or saved by GestureDeck.
 
@@ -90,22 +91,37 @@ To show your own presentation, click **Open PDF** and choose an unprotected `.pd
 
 ## Use GestureDeck from your phone
 
-The mobile remote controls the active sample deck or imported PDF from a phone browser on the same local network.
+The phone remote controls GestureDeck's sample deck or imported PDF, and can control a connected live Canva presentation in Chrome.
 
-1. Start GestureDeck and open it on the presenter computer at `http://localhost:5173` (or `http://127.0.0.1:5173`) so the browser can grant camera access. Plain HTTP on a LAN or Tailscale IP cannot access the camera.
+1. Start GestureDeck and open it on the presenter computer at `http://localhost:5173` (or `http://127.0.0.1:5173`). Camera permission is needed only for hand-gesture sessions.
 2. Connect both devices to the same trusted Wi-Fi network or Tailscale network.
 3. Choose **Connect phone**, select the private network interface used by the phone, and start the connection.
 4. Scan the QR code or copy the fallback URL to the phone. The pairing link expires after two minutes and can be renewed from the presenter dialog.
-5. Use **Previous**, **Next**, or the numbered slide picker. If Wi-Fi briefly drops, the phone reconnects and restores the current slide position.
+5. Use **Previous** and **Next** for any target. The numbered picker is available for GestureDeck's sample deck and imported PDFs; live Canva shows navigation only. If Wi-Fi briefly drops, the phone reconnects and restores the current target state.
 6. Choose **Disconnect** on the phone or **Disconnect phone** in the presenter dialog to end the remote session.
 
 The main GestureDeck server binds to `0.0.0.0`; open it over loopback on the presenter computer for camera access. The QR code or fallback URL uses the selected Wi-Fi or Tailscale address for the phone. The presenter controls stay restricted to connections from that computer. Only while a remote session is active, a separate temporary listener binds to the selected Wi-Fi or Tailscale IPv4 interface and serves the phone controls. It closes when the presenter stops the remote or closes the page. Pair only on a trusted network: local HTTP and WebSocket control traffic is unencrypted outside the Tailscale tunnel.
 
-The phone receives only the slide index, slide count, busy state, and navigation commands. It does not download slide content, PDF bytes, filenames, rendered pages, or camera data. The remote needs no internet connection, account, phone app, camera permission, PDF upload, slide transfer, or hosted QR service.
+The phone receives only target status, available slide position, busy state, and navigation commands. It does not download slide content, PDF bytes, filenames, rendered pages, or camera data. The phone remote itself needs no account, phone app, camera permission, PDF upload, slide transfer, or hosted QR service.
+
+## Use your phone with live Canva
+
+Live Canva control uses the GestureDeck Chrome extension and the existing QR phone remote. Hand-camera setup is not needed.
+
+1. Start GestureDeck with `npm run dev`.
+2. In Chrome, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select this repository's `extension/` folder.
+3. Open GestureDeck at `http://127.0.0.1:5173` on the presenter computer.
+4. Open a Canva design in **Present** or **View** mode. Click the GestureDeck extension icon and choose **Connect this presentation**.
+5. In GestureDeck, choose **Connect phone**, select the private network interface used by the phone, and show the QR code.
+6. Scan the QR code on the same trusted Wi-Fi or Tailscale network. Use the phone's **Previous** and **Next** buttons to control Canva.
+
+The extension accepts only a selected Canva presentation tab. Canva editing mode is refused. The phone does not show a slide number for Canva and receives no Canva design content. The extension does not request camera access. If the selected tab leaves Present or View mode, phone navigation is disabled.
+
+Canva control uses the default GestureDeck port, `5173`; the extension rejects controller pages on other local ports.
 
 ## Current prototype boundary
 
-The browser prototype controls its built-in sample slide deck or an imported PDF inside GestureDeck. A browser page cannot safely send keyboard events to a separate native Keynote process, so the macOS/Keynote target described in `spec.md` remains a platform-specific adapter to implement and test on macOS. The app must not imply that Keynote is connected when it is not.
+GestureDeck controls its built-in sample deck or imported PDFs in the local page. The Chrome extension adds phone-based Previous/Next control for a selected live Canva presentation. It does not control native Keynote, PowerPoint, or other presentation apps.
 
 ## Privacy and local model notes
 

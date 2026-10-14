@@ -51,13 +51,22 @@ function listenForClose(socket, callback) {
 }
 
 function sanitizeState(value) {
-  if (!isRecord(value)
+  if (!isRecord(value) || typeof value.busy !== 'boolean') return null;
+  if (value.target === 'canva') {
+    if (value.type !== undefined && value.type !== 'state') return null;
+    if (Object.keys(value).filter((key) => key !== 'type').sort().join(',') !== 'busy,index,ready,target,total'
+      || value.ready !== true && value.ready !== false
+      || value.index !== null
+      || value.total !== null
+      || value.busy !== false) return null;
+    return { target: 'canva', ready: value.ready, index: null, total: null, busy: false };
+  }
+  if ('target' in value
     || !Number.isSafeInteger(value.index)
     || !Number.isSafeInteger(value.total)
     || value.total < 1
     || value.index < 0
-    || value.index >= value.total
-    || typeof value.busy !== 'boolean') return null;
+    || value.index >= value.total) return null;
   return { index: value.index, total: value.total, busy: value.busy };
 }
 
@@ -281,7 +290,7 @@ export function createMobileRemoteSession({
     const record = { signature, ack: undefined, waiters: new Set([socket]) };
     commandRecords.set(message.id, record);
 
-    if (state.busy) {
+    if (state.busy || (state.target === 'canva' && !state.ready)) {
       record.ack = { type: 'commandAck', id: message.id, accepted: false };
       sendSocket(socket, record.ack);
       record.waiters.clear();

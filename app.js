@@ -7,6 +7,7 @@ import { openPdfPresentation } from './src/pdf-presentation.js';
 import { PresentationController } from './src/presentation.js';
 import { createMobileRemoteClient } from './src/mobile-remote-client.js';
 import { SwipeRecognizer } from './src/gesture-engine.js';
+import { createCanvaExtensionBridge } from './extension/shared/page-bridge.js';
 
 const $ = (id) => document.getElementById(id);
 const elements = {
@@ -128,6 +129,7 @@ const slides = [
 ];
 
 const presentation = new PresentationController(slides);
+const canvaExtensionBridge = createCanvaExtensionBridge();
 let mobileRemoteClient = null;
 let pairingReturnFocus = null;
 let pendingPairingInvite = null;
@@ -138,6 +140,8 @@ let remoteGeneration = 0;
 let remoteStopPromise = null;
 let closingMobileRemote = false;
 let pageIsHiding = false;
+let canvaTarget = { connected: false, ready: false };
+let phoneRemoteTarget = null;
 const savedSettings = loadSettings();
 const state = {
   mode: 'idle',
@@ -454,6 +458,27 @@ function syncPdfFullscreen() {
   if (state.pdf) void renderPdfPage(presentation.getSnapshot().index);
 }
 
+function renderTargetStatus() {
+  const target = remoteActive ? phoneRemoteTarget : canvaTarget.connected ? 'canva' : 'local';
+  if (target === 'canva') {
+    const status = canvaTarget.connected
+      ? canvaTarget.ready ? 'Connected' : 'Not ready'
+      : 'Disconnected';
+    setText(elements.targetStatus, `Canva presentation · ${status}`);
+    return;
+  }
+  setText(elements.targetStatus, state.pdf ? 'Imported PDF · browser demo' : 'Sample deck · browser demo');
+}
+
+function updateCanvaTarget(nextState) {
+  canvaTarget = {
+    connected: nextState?.connected === true,
+    ready: nextState?.connected === true && nextState?.ready === true,
+  };
+  renderTargetStatus();
+  if (remoteActive && phoneRemoteTarget === 'canva') publishRemoteState();
+}
+
 function renderSourceUi() {
   const pdfActive = Boolean(state.pdf);
   show(elements.connectPhone, true);
@@ -466,7 +491,7 @@ function renderSourceUi() {
   setText(elements.deckHeading, pdfActive ? state.pdfName : 'Field notes on presence');
   setText(elements.deckEyebrow, pdfActive ? 'YOUR PDF' : 'SAMPLE DECK');
   setText(elements.deckFormatLabel, pdfActive ? 'PDF · Local file' : 'Browser · Sample deck');
-  setText(elements.targetStatus, pdfActive ? 'Imported PDF · browser demo' : 'Sample deck · browser demo');
+  renderTargetStatus();
   if (elements.deckVisual) {
     elements.deckVisual.dataset.source = pdfActive ? 'pdf' : 'sample';
     if (pdfActive) {
@@ -568,7 +593,13 @@ export function announceAction(action, source = 'manual') {
   return true;
 }
 
-function remoteSnapshot() {
+function remoteSnapshot(target = remoteActive ? phoneRemoteTarget : canvaTarget.connected ? 'canva' : 'local') {
+  if (target === 'canva') {
+    return {
+      target: 'canva', ready: canvaTarget.connected && canvaTarget.ready,
+      index: null, total: null, busy: false,
+    };
+  }
   const { index, total } = presentation.getSnapshot();
   return { index, total, busy: state.pdfRendering };
 }
@@ -589,7 +620,14 @@ export function goToSlide(index, source = 'manual') {
 }
 
 function handleRemoteCommand(command) {
-  if (!command || typeof command !== 'object' || Array.isArray(command) || state.pdfRendering) return false;
+  if (!command || typeof command !== 'object' || Array.isArray(command)) return false;
+  if (phoneRemoteTarget === 'canva') {
+    if (Object.keys(command).join(',') !== 'action'
+      || (command.action !== 'previous' && command.action !== 'next')
+      || !canvaTarget.connected || !canvaTarget.ready) return false;
+    return canvaExtensionBridge.sendNavigation(command.action);
+  }
+  if (state.pdfRendering) return false;
   if (command.action === 'goTo') {
     if (Object.keys(command).sort().join(',') !== 'action,index') return false;
     return goToSlide(command.index, 'remote');
@@ -659,11 +697,13 @@ function resetPairingUi() {
   remoteActive = false;
   remoteStarting = false;
   remoteAuthenticated = false;
+  phoneRemoteTarget = null;
   clearPairingMaterial();
   show(elements.newPairingLink, false);
   show(elements.disconnectPhone, false);
   setPairingStatus('Disconnected');
   updatePairingStartButton();
+  renderTargetStatus();
 }
 
 function restorePairingFocus() {
@@ -758,6 +798,7 @@ async function startMobileRemote() {
     setPairingStatus('Choose a private network interface first.');
     return;
   }
+  const target = canvaTarget.connected ? 'canva' : 'local';
   const generation = ++remoteGeneration;
   remoteStarting = true;
   updatePairingStartButton();
@@ -769,7 +810,7 @@ async function startMobileRemote() {
   try {
     const result = await requestMobileRemote('start', {
       method: 'POST',
-      body: { address, state: remoteSnapshot() },
+      body: { address, state: remoteSnapshot(target) },
     });
     serverStarted = true;
     if (generation !== remoteGeneration) {
@@ -783,6 +824,8 @@ async function startMobileRemote() {
     pendingPairingInvite = { qrDataUrl: result.qrDataUrl, fallbackUrl: result.fallbackUrl };
     remoteStarting = false;
     remoteActive = true;
+    phoneRemoteTarget = target;
+    renderTargetStatus();
     show(elements.disconnectPhone, true);
     setPairingStatus('Waiting for the presenter connection…');
     updatePairingStartButton();
@@ -802,6 +845,8 @@ async function startMobileRemote() {
     remoteStarting = false;
     remoteActive = false;
     remoteAuthenticated = false;
+    phoneRemoteTarget = null;
+    renderTargetStatus();
     clearPairingMaterial();
     show(elements.newPairingLink, false);
     show(elements.disconnectPhone, false);
@@ -1346,6 +1391,7 @@ function bindEvents() {
   window.addEventListener('pagehide', () => {
     pageIsHiding = true;
     const remoteStop = stopMobileRemote({ keepalive: true, force: true });
+    canvaExtensionBridge.close();
     clearFullscreenToolbarTimer();
     state.pdfImportToken += 1;
     state.pdfRenderToken += 1;
@@ -1379,6 +1425,9 @@ if (elements.reverseMapping) {
   elements.reverseMapping.setAttribute('aria-pressed', String(state.reverseMapping));
   setText(elements.reverseMapping, state.reverseMapping ? 'Reverse swipes: on' : 'Reverse swipes: off');
 }
+
+canvaExtensionBridge.subscribe(updateCanvaTarget);
+void canvaExtensionBridge.requestStatus().then(updateCanvaTarget);
 
 bindEvents();
 renderSlide();

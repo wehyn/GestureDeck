@@ -5,13 +5,21 @@ function isRecord(value) {
 }
 
 function sanitizeState(value) {
-  if (!isRecord(value)
+  if (!isRecord(value) || typeof value.busy !== 'boolean') return null;
+  if (value.target === 'canva') {
+    if (Object.keys(value).sort().join(',') !== 'busy,index,ready,target,total'
+      || value.ready !== true && value.ready !== false
+      || value.index !== null
+      || value.total !== null
+      || value.busy !== false) return null;
+    return { target: 'canva', ready: value.ready, index: null, total: null, busy: false };
+  }
+  if ('target' in value
     || !Number.isSafeInteger(value.index)
     || !Number.isSafeInteger(value.total)
     || value.total < 1
     || value.index < 0
-    || value.index >= value.total
-    || typeof value.busy !== 'boolean') return null;
+    || value.index >= value.total) return null;
   return { index: value.index, total: value.total, busy: value.busy };
 }
 
@@ -95,9 +103,14 @@ export function createMobileRemoteClient({
       const command = message.action === 'goTo'
         ? { action: message.action, index: message.index }
         : { action: message.action };
-      let accepted = false;
-      try { accepted = Boolean(onCommand(command)); } catch { /* Reject failed commands. */ }
-      send({ type: 'commandAck', id: message.id, accepted });
+      let result = false;
+      try { result = onCommand(command); } catch { /* Reject failed commands. */ }
+      if (result && typeof result.then === 'function') {
+        Promise.resolve(result).then(
+          (accepted) => send({ type: 'commandAck', id: message.id, accepted: Boolean(accepted) }),
+          () => send({ type: 'commandAck', id: message.id, accepted: false }),
+        );
+      } else send({ type: 'commandAck', id: message.id, accepted: Boolean(result) });
       return;
     }
     if (['phonePaired', 'inviteExpired', 'sessionEnded'].includes(message.type)

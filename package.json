@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "node server.mjs",
     "test": "node --test",
-    "check": "node --check server.mjs && node --check app.js && node --check src/mobile-remote-session.js && node --check src/mobile-remote-server.js && node --check src/mobile-remote-client.js && node --check src/mobile-remote-phone.js && node --check src/websocket.js && node --check src/qr-code.js && node --check src/presentation.js && node --check src/pdf-presentation.js && node --check src/camera-session.js && node --check src/camera-preview.js && node --check src/hand-overlay.js && node --check src/hand-tracking.js && node --check src/local-hand-tracker.js && node --check src/gesture-engine.js"
+    "check": "node --check server.mjs && node --check app.js && node --check src/mobile-remote-session.js && node --check src/mobile-remote-server.js && node --check src/mobile-remote-client.js && node --check src/mobile-remote-phone.js && node --check src/websocket.js && node --check src/qr-code.js && node --check src/presentation.js && node --check src/pdf-presentation.js && node --check src/camera-session.js && node --check src/camera-preview.js && node --check src/hand-overlay.js && node --check src/hand-tracking.js && node --check src/local-hand-tracker.js && node --check src/gesture-engine.js && node --check extension/shared/page-bridge.js && node --check extension/shared/protocol.js && node --check extension/background/service-worker.js && node --check extension/popup/popup.js && node --check extension/content/controller-bridge.js && node --check extension/content/canva-content.js"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "0.10.33",
