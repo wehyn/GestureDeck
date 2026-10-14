@@ -113,15 +113,31 @@ export function createAppServer({ root = projectRoot, host = '0.0.0.0' } = {}) {
         return;
       }
 
-      response.writeHead(200, {
-        'content-type': contentTypes.get(path.extname(realFilePath).toLowerCase()) ?? 'application/octet-stream',
-        'content-length': info.size,
-        'cache-control': 'no-store',
+      const etag = `W/"${info.size.toString(16)}-${Math.trunc(info.mtimeMs * 1000).toString(16)}"`;
+      const headers = {
+        'cache-control': 'no-cache',
+        etag,
         'x-content-type-options': 'nosniff',
         'cross-origin-opener-policy': 'same-origin',
         'cross-origin-embedder-policy': 'require-corp',
         'cross-origin-resource-policy': 'same-origin',
         'content-security-policy': `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self' ws: wss:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'`,
+      };
+      const ifNoneMatch = request.headers['if-none-match'];
+      const notModified = ifNoneMatch?.split(',').some((value) => {
+        const tag = value.trim();
+        return tag === '*' || tag.replace(/^W\//, '') === etag.slice(2);
+      });
+      if (notModified) {
+        response.writeHead(304, headers);
+        response.end();
+        return;
+      }
+
+      response.writeHead(200, {
+        ...headers,
+        'content-type': contentTypes.get(path.extname(realFilePath).toLowerCase()) ?? 'application/octet-stream',
+        'content-length': info.size,
       });
       if (request.method === 'HEAD') {
         response.end();

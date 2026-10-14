@@ -183,3 +183,51 @@ test('app server attaches the mobile remote controller and accepts all-interface
   assert.equal(typeof server.mobileRemote.close, 'function');
   assert.doesNotThrow(() => createAppServer({ host: '0.0.0.0' }));
 });
+
+test('development server revalidates static files and serves changed contents', async () => {
+  const root = await mkdtemp(path.join(scratch, 'gesturedeck-server-cache-'));
+  await writeFile(path.join(root, 'index.html'), 'version one');
+  const server = createAppServer({ root });
+
+  try {
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    const first = await fetch(`${origin}/`);
+    const etag = first.headers.get('etag');
+    assert.equal(first.status, 200);
+    assert.equal(first.headers.get('cache-control'), 'no-cache');
+    assert.match(etag, /^W\/".+"$/);
+    assert.ok(first.headers.get('content-security-policy'));
+    assert.equal(await first.text(), 'version one');
+
+    const unchanged = await fetch(`${origin}/`, { headers: { 'if-none-match': `"other", ${etag}` } });
+    assert.equal(unchanged.status, 304);
+    assert.equal(unchanged.headers.get('cache-control'), 'no-cache');
+    assert.ok(unchanged.headers.get('cross-origin-opener-policy'));
+    assert.ok(unchanged.headers.get('content-security-policy'));
+    assert.equal(unchanged.headers.get('content-length'), null);
+    assert.equal(await unchanged.text(), '');
+
+    const weakMatched = await fetch(`${origin}/`, { headers: { 'if-none-match': etag.replace(/^W\//, '') } });
+    assert.equal(weakMatched.status, 304);
+    const wildcard = await fetch(`${origin}/`, { headers: { 'if-none-match': '*' } });
+    assert.equal(wildcard.status, 304);
+
+    await writeFile(path.join(root, 'index.html'), 'version two with new contents');
+    const changed = await fetch(`${origin}/`);
+    assert.equal(changed.status, 200);
+    assert.notEqual(changed.headers.get('etag'), etag);
+    assert.equal(await changed.text(), 'version two with new contents');
+
+    const unchangedHead = await fetch(`${origin}/`, {
+      method: 'HEAD', headers: { 'if-none-match': changed.headers.get('etag') },
+    });
+    assert.equal(unchangedHead.status, 304);
+    assert.equal(await unchangedHead.text(), '');
+  } finally {
+    server.close();
+    await once(server, 'close');
+    await rm(root, { recursive: true, force: true });
+  }
+});
