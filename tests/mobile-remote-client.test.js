@@ -15,7 +15,7 @@ class FakeWebSocket {
 
   send(value) { this.sent.push(JSON.parse(value)); }
   open() { this.readyState = 1; this.onopen?.(); }
-  message(value) { this.onmessage?.({ data: JSON.stringify(value) }); }
+  message(value) { return this.onmessage?.({ data: JSON.stringify(value) }); }
   raw(value) { this.onmessage?.({ data: value }); }
   close() { this.readyState = 3; this.onclose?.(); }
 }
@@ -52,6 +52,17 @@ test('authenticates first, then publishes only the latest sanitized state', () =
   assert.equal(socket.sent.length, 3);
 });
 
+test('publishes Canva readiness without inventing slide position', () => {
+  const { client, socket } = setup();
+  const state = { target: 'canva', ready: true, index: null, total: null, busy: false };
+
+  assert.equal(client.publishState(state), true);
+  socket.open();
+  socket.message({ type: 'presenterReady' });
+
+  assert.deepEqual(socket.sent.at(-1), { type: 'state', ...state });
+});
+
 test('valid commands reach the bridge and receive acknowledgements; malformed messages are ignored', () => {
   const { client, socket, commands } = setup();
   socket.open();
@@ -80,6 +91,24 @@ test('valid commands reach the bridge and receive acknowledgements; malformed me
   assert.equal(socket.sent.length, before);
   assert.equal(commands.length, 3);
   client.close();
+});
+
+test('waits for an asynchronous target result before acknowledging a phone command', async () => {
+  let resolveCommand;
+  const { socket } = setup({
+    onCommand: () => new Promise((resolve) => { resolveCommand = resolve; }),
+  });
+  socket.open();
+  socket.message({ type: 'presenterReady' });
+
+  const handling = socket.message({ type: 'command', id: 'async-next', action: 'next' });
+  assert.equal(socket.sent.some(({ type }) => type === 'commandAck'), false);
+
+  resolveCommand(false);
+  await handling;
+  assert.deepEqual(socket.sent.at(-1), {
+    type: 'commandAck', id: 'async-next', accepted: false,
+  });
 });
 
 test('callback failure acknowledges false and host events use the connection callback', () => {

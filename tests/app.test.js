@@ -105,7 +105,10 @@ test('client controller renders deck settings and progress without requesting ca
     getElementById: (id) => elements.get(id) ?? null,
     addEventListener() {},
   });
-  setGlobal('window', { addEventListener() {}, location: { protocol: 'http:', host: '127.0.0.1:5173' } });
+  setGlobal('window', {
+    addEventListener() {}, postMessage() {},
+    location: { protocol: 'http:', host: '127.0.0.1:5173', origin: 'http://127.0.0.1:5173' },
+  });
   let cameraRequests = 0;
   const cameraConstraints = [];
   let rejectPendingCameraRequest;
@@ -354,7 +357,7 @@ test('presenter pairing stays camera independent and follows authenticated host 
     'pairing-qr-panel', 'pairing-qr', 'pairing-url-panel', 'pairing-url',
     'copy-pairing-url', 'pairing-status', 'new-pairing-link', 'disconnect-phone',
     'close-pairing-dialog', 'camera-preview', 'slide-number', 'slide-count', 'deck-progress',
-    'deck-visual', 'sample-canvas-topline', 'sample-canvas-content', 'sample-canvas-footer',
+    'deck-visual', 'target-status', 'sample-canvas-topline', 'sample-canvas-content', 'sample-canvas-footer',
   ];
   const elements = new Map(ids.map((id) => [id, new FakeElement()]));
   elements.get('start-phone-remote').disabled = true;
@@ -376,10 +379,35 @@ test('presenter pairing stays camera independent and follows authenticated host 
     addEventListener: (type, callback) => documentListeners.set(type, callback),
   };
   setGlobal('document', fakeDocument);
-  setGlobal('window', {
-    addEventListener: (type, callback) => windowListeners.set(type, callback),
-    location: { protocol: 'http:', host: '127.0.0.1:5173' },
-  });
+  let extensionState = { connected: false, ready: false };
+  const extensionRequests = [];
+  const fakeWindow = {
+    location: { protocol: 'http:', host: '127.0.0.1:5173', origin: 'http://127.0.0.1:5173' },
+    addEventListener(type, callback) {
+      const listeners = windowListeners.get(type) ?? [];
+      listeners.push(callback);
+      windowListeners.set(type, listeners);
+    },
+    removeEventListener(type, callback) {
+      windowListeners.set(type, (windowListeners.get(type) ?? []).filter((listener) => listener !== callback));
+    },
+    dispatchMessage(data, origin = this.location.origin) {
+      for (const callback of windowListeners.get('message') ?? []) callback({ source: this, origin, data });
+    },
+    postMessage(message, targetOrigin) {
+      extensionRequests.push(message);
+      if (message?.source !== 'gesturedeck' || message.type !== 'canva-controller-request') return;
+      const response = message.command === 'status'
+        ? { source: 'gesturedeck-extension', type: 'canva-controller-response', id: message.id, command: 'status', state: { ...extensionState } }
+        : { source: 'gesturedeck-extension', type: 'canva-controller-response', id: message.id, command: 'navigate', accepted: extensionState.connected && extensionState.ready };
+      queueMicrotask(() => this.dispatchMessage(response, targetOrigin));
+    },
+  };
+  const publishExtensionState = (nextState) => {
+    extensionState = nextState;
+    fakeWindow.dispatchMessage({ source: 'gesturedeck-extension', type: 'canva-target-state', ...nextState });
+  };
+  setGlobal('window', fakeWindow);
   let cameraRequests = 0;
   setGlobal('navigator', {
     mediaDevices: { getUserMedia: async () => { cameraRequests += 1; throw new Error('Camera should remain off.'); } },
@@ -484,9 +512,34 @@ test('presenter pairing stays camera independent and follows authenticated host 
     await connectButton.dispatch('click');
     elements.get('pairing-interface').value = '10.0.0.4';
     elements.get('pairing-interface').dispatch('change');
+    publishExtensionState({ connected: true, ready: true });
+    assert.equal(elements.get('target-status').textContent, 'Canva presentation · Connected');
+    await connectButton.dispatch('click');
+    elements.get('pairing-interface').value = '192.168.1.20';
+    elements.get('pairing-interface').dispatch('change');
     await elements.get('start-phone-remote').dispatch('click');
-    const pagehideSocket = RemoteSocket.instance;
-    await windowListeners.get('pagehide')();
+    const canvaStartCall = calls.filter(({ url }) => url === '/api/mobile-remote/start').at(-1);
+    assert.deepEqual(canvaStartCall.body, {
+      address: '192.168.1.20',
+      state: { target: 'canva', ready: true, index: null, total: null, busy: false },
+    });
+    const canvaSocket = RemoteSocket.instance;
+    canvaSocket.open();
+    canvaSocket.message({ type: 'presenterReady' });
+    canvaSocket.message({ type: 'command', id: 'canva-next', action: 'next' });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(extensionRequests.at(-1).action, 'next');
+    assert.equal(elements.get('slide-number').textContent, '01');
+    assert.deepEqual(canvaSocket.sent.at(-1), { type: 'commandAck', id: 'canva-next', accepted: true });
+
+    publishExtensionState({ connected: false, ready: false });
+    assert.equal(elements.get('target-status').textContent, 'Canva presentation · Disconnected');
+    canvaSocket.message({ type: 'command', id: 'canva-offline', action: 'next' });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(canvaSocket.sent.at(-1), { type: 'commandAck', id: 'canva-offline', accepted: false });
+
+    const pagehideSocket = canvaSocket;
+    await windowListeners.get('pagehide')?.[0]?.();
     assert.equal(calls.filter(({ url }) => url === '/api/mobile-remote/stop').length, 2);
     assert.equal(pagehideSocket.readyState, 3);
     assert.equal(elements.get('pairing-url').value, '');

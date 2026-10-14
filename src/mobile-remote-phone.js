@@ -7,13 +7,22 @@ function isRecord(value) {
 }
 
 function sanitizeState(value) {
-  if (!isRecord(value)
+  if (!isRecord(value) || typeof value.busy !== 'boolean') return null;
+  if (value.target === 'canva') {
+    if (value.type !== undefined && value.type !== 'state') return null;
+    if (Object.keys(value).filter((key) => key !== 'type').sort().join(',') !== 'busy,index,ready,target,total'
+      || value.ready !== true && value.ready !== false
+      || value.index !== null
+      || value.total !== null
+      || value.busy !== false) return null;
+    return { target: 'canva', ready: value.ready, index: null, total: null, busy: false };
+  }
+  if ('target' in value
     || !Number.isSafeInteger(value.index)
     || !Number.isSafeInteger(value.total)
     || value.total < 1
     || value.index < 0
-    || value.index >= value.total
-    || typeof value.busy !== 'boolean') return null;
+    || value.index >= value.total) return null;
   return { index: value.index, total: value.total, busy: value.busy };
 }
 
@@ -37,14 +46,16 @@ export function mountMobileRemotePhone({
   }
 
   const statusElement = document.getElementById('connection-status');
+  const targetLabel = document.getElementById('target-label');
   const positionElement = document.getElementById('slide-position');
   const previousButton = document.getElementById('previous-button');
   const nextButton = document.getElementById('next-button');
   const slideNumber = document.getElementById('slide-number');
   const goButton = document.getElementById('go-button');
+  const jumpPanel = document.getElementById('jump-panel');
   const disconnectButton = document.getElementById('disconnect-button');
   const actionStatus = document.getElementById('action-status');
-  const elements = [statusElement, positionElement, previousButton, nextButton, slideNumber, goButton, disconnectButton, actionStatus];
+  const elements = [statusElement, targetLabel, positionElement, previousButton, nextButton, slideNumber, goButton, jumpPanel, disconnectButton, actionStatus];
   if (elements.some((element) => !element)) throw new TypeError('Phone remote page is missing required controls');
 
   const timerHost = document.defaultView ?? globalThis;
@@ -96,13 +107,24 @@ export function mountMobileRemotePhone({
   }
 
   function renderControls() {
-    const canNavigate = ready && Boolean(currentState) && !currentState.busy;
-    previousButton.disabled = !canNavigate || currentState.index === 0;
-    nextButton.disabled = !canNavigate || currentState.index >= currentState.total - 1;
-    slideNumber.disabled = !canNavigate;
-    goButton.disabled = !canNavigate;
+    const canvaTarget = currentState?.target === 'canva';
+    const canNavigate = ready && Boolean(currentState) && !currentState.busy && (!canvaTarget || currentState.ready);
+    targetLabel.textContent = canvaTarget
+      ? currentState.ready ? 'LIVE CANVA PRESENTATION' : 'CANVA NOT READY'
+      : 'CURRENT SLIDE';
+    positionElement.hidden = canvaTarget;
+    jumpPanel.hidden = canvaTarget;
+    previousButton.disabled = !canNavigate || (!canvaTarget && currentState.index === 0);
+    nextButton.disabled = !canNavigate || (!canvaTarget && currentState.index >= currentState.total - 1);
+    slideNumber.disabled = !canNavigate || canvaTarget;
+    goButton.disabled = !canNavigate || canvaTarget;
     disconnectButton.disabled = terminal || explicitlyDisconnected || !(credential || ready);
-    if (currentState) {
+    if (canvaTarget) {
+      positionElement.textContent = 'Canva presentation';
+      slideNumber.value = '';
+      slideNumber.removeAttribute?.('max');
+      slideNumber.removeAttribute?.('min');
+    } else if (currentState) {
       positionElement.textContent = `${currentState.index + 1} / ${currentState.total}`;
       slideNumber.value = String(currentState.index + 1);
       slideNumber.setAttribute('max', String(currentState.total));
@@ -182,10 +204,11 @@ export function mountMobileRemotePhone({
   }
 
   function sendNavigation(action, index) {
-    if (!ready || !currentState || currentState.busy || !isOpen()) return false;
+    if (!ready || !currentState || currentState.busy || (currentState.target === 'canva' && !currentState.ready) || !isOpen()) return false;
     if (!['previous', 'next', 'goTo'].includes(action)) return false;
-    if (action === 'previous' && currentState.index === 0) return false;
-    if (action === 'next' && currentState.index >= currentState.total - 1) return false;
+    if (currentState.target === 'canva' && action === 'goTo') return false;
+    if (currentState.target !== 'canva' && action === 'previous' && currentState.index === 0) return false;
+    if (currentState.target !== 'canva' && action === 'next' && currentState.index >= currentState.total - 1) return false;
     if (action === 'goTo' && (!Number.isSafeInteger(index) || index < 0 || index >= currentState.total)) return false;
     const id = createCommandId();
     if (!id) {
@@ -291,7 +314,7 @@ export function mountMobileRemotePhone({
       && typeof message.accepted === 'boolean') {
       actionStatus.textContent = message.accepted
         ? 'Command accepted by presenter.'
-        : 'Presenter is busy. Try again when the slide is ready.';
+        : 'Command was not accepted. Check the presentation connection and try again.';
       return;
     }
 

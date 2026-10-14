@@ -58,9 +58,10 @@ export function isLocalPresenterHost(host, port, interfaceProvider = os.networkI
 function isLocalPresenterRequest(request, port, interfaceProvider, requireOrigin) {
   const host = request.headers.host;
   const peer = normalizeAddress(request.socket.remoteAddress);
+  const peerIsLocalInterface = Object.values(interfaceProvider()).some((entries) =>
+    (entries ?? []).some((entry) => normalizeAddress(entry.address) === peer));
   const isLocalPeer = peer === '127.0.0.1' || peer === '::1'
-    || Object.values(interfaceProvider()).some((entries) =>
-      (entries ?? []).some((entry) => normalizeAddress(entry.address) === peer));
+    || (isPrivateOrTailscale(peer) && peerIsLocalInterface);
   if (!isLocalPeer || !isLocalPresenterHost(host, port, interfaceProvider)) return false;
   return request.headers.origin === `http://${host}`
     || (!requireOrigin && request.headers.origin === undefined);
@@ -213,9 +214,22 @@ export function attachMobileRemote(server, {
     if (listener || starting || stopping) return { status: 409, value: { error: 'already-started' } };
     if (!listPrivateInterfaces(interfaces).includes(body.address)) return { status: 400, value: { error: 'invalid-address' } };
     const state = body.state;
-    if (!isRecord(state) || !Number.isSafeInteger(state.index) || !Number.isSafeInteger(state.total)
-      || state.total < 1 || state.index < 0 || state.index >= state.total
-      || typeof state.busy !== 'boolean') {
+    const canvaState = isRecord(state)
+      && Object.keys(state).sort().join(',') === 'busy,index,ready,target,total'
+      && state.target === 'canva'
+      && typeof state.ready === 'boolean'
+      && state.index === null
+      && state.total === null
+      && state.busy === false;
+    const localState = isRecord(state)
+      && !('target' in state)
+      && Number.isSafeInteger(state.index)
+      && Number.isSafeInteger(state.total)
+      && state.total >= 1
+      && state.index >= 0
+      && state.index < state.total
+      && typeof state.busy === 'boolean';
+    if (!canvaState && !localState) {
       return { status: 400, value: { error: 'invalid-state' } };
     }
     starting = true;

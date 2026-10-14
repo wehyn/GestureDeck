@@ -37,6 +37,32 @@ test('served app shell loads the client controller module', async () => {
   }
 });
 
+test('development server exposes the Canva page bridge and protocol but keeps Chrome-only files private', async () => {
+  const server = createAppServer();
+  try {
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    const protocol = await fetch(`${origin}/extension/shared/protocol.js`);
+    assert.equal(protocol.status, 200);
+    assert.match(await protocol.text(), /isControllerRequest/);
+    const pageBridge = await fetch(`${origin}/extension/shared/page-bridge.js`);
+    assert.equal(pageBridge.status, 200);
+    for (const route of [
+      '/extension/manifest.json', '/extension/background/service-worker.js',
+      '/extension/popup/popup.html', '/extension/popup/popup.css', '/extension/popup/popup.js',
+      '/extension/content/controller-bridge.js',
+      '/extension/content/canva-content.js',
+    ]) {
+      const response = await fetch(`${origin}${route}`);
+      assert.equal(response.status, 404, `${route} should stay private to Chrome's unpacked extension`);
+    }
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
+});
+
 test('development server exposes only the required PDF.js runtime assets', async () => {
   const server = createAppServer();
   try {

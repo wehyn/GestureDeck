@@ -173,6 +173,40 @@ test('valid invite pairs, stores only the credential, and removes the fragment',
   assert.equal(result.document.getElementById('previous-button').disabled, false);
 });
 
+test('Canva phone remote enables Previous/Next without guessing slide position', () => {
+  const result = setup();
+  paired(result, { target: 'canva', ready: true, index: null, total: null, busy: false });
+
+  assert.equal(result.document.getElementById('target-label').textContent, 'LIVE CANVA PRESENTATION');
+  assert.equal(result.document.getElementById('slide-position').hidden, true);
+  assert.equal(result.document.getElementById('slide-position').textContent, 'Canva presentation');
+  assert.equal(result.document.getElementById('jump-panel').hidden, true);
+  assert.equal(result.document.getElementById('slide-number').value, '');
+  assert.equal(result.document.getElementById('previous-button').disabled, false);
+  assert.equal(result.document.getElementById('next-button').disabled, false);
+
+  result.document.getElementById('previous-button').dispatch('click');
+  result.document.getElementById('next-button').dispatch('click');
+  result.document.getElementById('slide-number').value = '3';
+  result.document.getElementById('go-button').dispatch('click');
+  assert.deepEqual(result.socket.sent.slice(-2).map(({ action }) => action), ['previous', 'next']);
+});
+
+test('Canva phone keeps navigation disabled until the extension target is ready', () => {
+  const result = setup();
+  paired(result, { target: 'canva', ready: false, index: null, total: null, busy: false });
+
+  assert.equal(result.document.getElementById('target-label').textContent, 'CANVA NOT READY');
+  assert.equal(result.document.getElementById('previous-button').disabled, true);
+  assert.equal(result.document.getElementById('next-button').disabled, true);
+  result.socket.message({
+    type: 'state', target: 'canva', ready: true, index: null, total: null, busy: false,
+  });
+  assert.equal(result.document.getElementById('target-label').textContent, 'LIVE CANVA PRESENTATION');
+  assert.equal(result.document.getElementById('previous-button').disabled, false);
+  assert.equal(result.document.getElementById('next-button').disabled, false);
+});
+
 test('credential storage failure disconnects the paired phone and clears storage', () => {
   const result = setup();
   result.socket.open();
