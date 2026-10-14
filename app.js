@@ -1017,6 +1017,7 @@ async function startCloudMobileRemote() {
     remoteStarting = false;
     phoneRemoteTarget = initialPhoneRemoteTarget;
     remoteActive = true;
+    renderTargetStatus();
     show(elements.disconnectPhone, true);
     updatePairingStartButton();
     setPairingStatus('Waiting for the presenter connection…');
