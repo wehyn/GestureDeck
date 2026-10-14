@@ -935,6 +935,12 @@ async function startMobileRemote() {
   setPairingStatus('Starting the phone connection…');
   let serverStarted = false;
   try {
+    while (remoteStopPromise) {
+      const pendingStop = remoteStopPromise;
+      await pendingStop;
+      if (generation !== remoteGeneration) return;
+    }
+    if (generation !== remoteGeneration) return;
     const result = await requestMobileRemote('start', {
       method: 'POST',
       body: { address, state: remoteSnapshot(target) },
