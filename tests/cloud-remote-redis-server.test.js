@@ -60,7 +60,21 @@ class MemoryRedis {
       if (session.hostCredential !== args[0]) return 'invalid';
       if (this.values.has(keys[1])) return 'occupied';
       this.values.set(keys[1], args[1]);
+      this.#publish(keys[2], keys[3], { type: 'state', ...session.state });
       return JSON.stringify(session.state);
+    }
+
+    if (operation === 'RENEW_INVITE') {
+      const session = this.values.get(keys[0]);
+      const now = Number(args[2]);
+      if (!session?.active || Number(session.expiresAt ?? 0) <= now
+        || session.hostCredential !== args[0] || session.origin !== args[1]) return 'unavailable';
+      session.invite = args[3];
+      session.inviteExpiresAt = Number(args[4]);
+      session.pairAttempts = 0;
+      session.inviteExpiredNotified = false;
+      this.values.set(keys[0], session);
+      return JSON.stringify({ origin: session.origin, invite: session.invite, inviteExpiresAt: session.inviteExpiresAt });
     }
 
     if (operation === 'PHONE_PAIR') {
@@ -128,9 +142,11 @@ class MemoryRedis {
 
     if (operation === 'PHONE_COMMAND') {
       const session = this.values.get(keys[0]);
-      const paired = Object.values(session?.phones ?? {}).some((phone) => phone.credential === args[0])
-        || session?.phoneCredential === args[0];
-      if (!session?.active || !paired) return 'invalid';
+      const paired = Object.values(session?.phones ?? {}).some((phone) => phone.credential === args[0]);
+      const legacy = !paired && session?.phoneCredential === args[0];
+      const leaseKey = legacy ? keys[5] : keys[4];
+      if (!session?.active || (!paired && !legacy)) return 'invalid';
+      if (this.values.get(leaseKey) !== args[6]) return 'invalid';
       if (args[1] === 'goTo' && Number(args[2]) >= session.state.total) return 'out-of-range';
       if (this.commandKeys.has(keys[1])) return 'duplicate';
       this.commandKeys.add(keys[1]);
@@ -139,20 +155,45 @@ class MemoryRedis {
     }
 
     if (operation === 'REMOVE_PHONE') {
+      if (args[5] && this.values.get(keys[2]) !== args[5]) return 'replaced';
       const session = this.values.get(keys[0]);
-      if (!session) return 'missing';
+      if (!session) return 'missing-session';
+      if (args[5] && !session.active) return 'ended';
       const phones = session.phones ?? {};
       let phone = phones[args[0]];
+      let legacy = false;
       if (!phone && session.phoneCredential && (session.phoneId ?? session.phoneCredential) === args[0]) {
         phone = { phoneId: args[0], credential: session.phoneCredential };
-        this.values.delete(keys[1]);
-        delete session.phoneCredential;
+        legacy = true;
       }
       if (!phone || (args[1] !== '' && phone.credential !== args[1])) return 'missing';
+      if (args[4]) {
+        const leaseKey = legacy ? keys[1] : `${args[2]}${phone.credential}`;
+        if (this.values.get(leaseKey) !== args[4]) return 'missing';
+      }
+      if (legacy) {
+        this.values.delete(keys[1]);
+        delete session.phoneCredential;
+        delete session.phoneId;
+        delete session.phoneLabel;
+        delete session.phoneDeviceType;
+      }
       delete phones[args[0]];
       session.phones = phones;
       this.values.set(keys[0], session);
       this.values.delete(`${args[2]}${phone.credential}`);
+      if (args[5]) {
+        this.#publish(keys[3], keys[4], { type: 'sessionEnded', phoneId: args[0] });
+        const visible = Object.entries(phones).map(([phoneId, record]) => ({
+          phoneId,
+          label: record.label || 'Phone',
+          deviceType: record.deviceType || 'phone',
+          status: this.values.has(`${args[2]}${record.credential}`) ? 'connected' : 'reconnecting',
+          ordinal: Number(record.ordinal) || 0,
+        })).sort((left, right) => left.ordinal - right.ordinal || left.phoneId.localeCompare(right.phoneId))
+          .map(({ ordinal, ...record }) => record);
+        this.#emit(keys[5], { type: 'phones', phones: visible }, args[7]);
+      }
       return 'removed';
     }
 
@@ -170,10 +211,32 @@ class MemoryRedis {
     }
 
     if (operation === 'UPDATE_STATE') {
+      if (this.values.get(keys[1]) !== args[2]) return 'replaced';
       const session = this.values.get(keys[0]);
       if (!session) return 'missing';
       if (!session.active) return 'ended';
+      if (Number(session.expiresAt ?? 0) <= Number(args[1])) return 'ended';
       session.state = JSON.parse(args[0]);
+      this.values.set(keys[0], session);
+      this.#publish(keys[2], keys[3], { type: 'state', ...session.state });
+      return 'ok';
+    }
+
+    if (operation === 'PRESENTER_ACK') {
+      if (this.values.get(keys[1]) !== args[0]) return 'replaced';
+      const session = this.values.get(keys[0]);
+      if (!session) return 'missing';
+      if (!session.active) return 'ended';
+      this.#publish(keys[2], keys[3], JSON.parse(args[1]));
+      return 'ok';
+    }
+
+    if (operation === 'PRESENTER_EVENT') {
+      if (this.values.get(keys[1]) !== args[0]) return 'replaced';
+      const session = this.values.get(keys[0]);
+      if (!session) return 'missing';
+      if (!session.active) return 'ended';
+      this.#emit(keys[2], JSON.parse(args[1]), args[2]);
       return 'ok';
     }
 
@@ -201,12 +264,11 @@ class MemoryRedis {
 
     if (operation === 'RELEASE_PRESENTER') {
       if (this.values.get(keys[1]) !== args[0]) return 0;
-      this.values.delete(keys[1]);
       const session = this.values.get(keys[0]);
-      if (session) {
-        session.active = false;
-        this.values.set(keys[0], session);
-      }
+      if (!session?.active) return 0;
+      this.values.delete(keys[1]);
+      session.active = false;
+      this.values.set(keys[0], session);
       return 1;
     }
 
@@ -224,11 +286,15 @@ class MemoryRedis {
     const id = `${++this.streamOrdinal}-0`;
     entries.push({ id, message: structuredClone(message) });
     this.streams.set(streamKey, entries);
-    const envelope = { eventId: id, message: structuredClone(message) };
+    this.#emit(channel, message, id);
+    return id;
+  }
+
+  #emit(channel, message, eventId) {
+    const envelope = { eventId, message: structuredClone(message) };
     for (const subscriber of this.subscribers.get(channel) ?? []) {
       queueMicrotask(() => subscriber.emit('message', { message: envelope }));
     }
-    return id;
   }
 }
 
