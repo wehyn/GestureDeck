@@ -175,4 +175,3 @@ Push only the integration branch, then open a PR describing the Canva extension 
 - [ ] **Step 2: Link the PR to this thread**
 
 Immediately call T3 Code's `link_pull_request` with the full PR URL. Before finishing, call `list_thread_pull_requests` and confirm the PR is linked.
-

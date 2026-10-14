@@ -1,8 +1,8 @@
 # hornley to wehyn Integration Design
 
-**Date:** 2026-10-14  
-**Target:** `wehyn/GestureDeck` `main` at `562ce538`  
-**Source:** `hornley/GestureDeck` `main` at `b8ff03e`
+- **Date:** 2026-10-14
+- **Target:** `wehyn/GestureDeck` `main` at `562ce538`
+- **Source:** `hornley/GestureDeck` `main` at `b8ff03e`
 
 ## Goal
 
