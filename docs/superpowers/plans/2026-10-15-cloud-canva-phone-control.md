@@ -20,6 +20,7 @@
 - `src/cloud-remote-server.js` — in-memory hosted relay used by the development server; validates initial session state.
 - `src/cloud-remote-redis-server.js` — production Redis relay; validates hosted state and phone commands.
 - `src/mobile-remote-session.js` — shared in-memory session command validation.
+- `app.js` — presenter workspace chooses the active phone-control target when a cloud session starts.
 - `README.md` — documents local and hosted Canva setup and removes the hosted Canva limitation.
 
 The presenter app, phone client, and phone UI already publish, display, and route Canva readiness and Previous/Next. Preserve those interfaces.
@@ -138,6 +139,33 @@ Remove the statement that Canva is unavailable in hosted sessions. State that cl
 ```bash
 git add README.md
 git commit -m "docs: explain hosted Canva phone setup"
+```
+
+## Task 4: Preserve the selected target in hosted sessions
+
+**Files:**
+
+- Modify: `app.js`
+
+- [ ] **Step 1: Capture the initial hosted session state and target together.**
+
+In `startCloudMobileRemote()`, compute `const initialState = remoteSnapshot()` before the cloud start request and pass that same object as the request's `state`. Derive the phone target from this captured state: use `canva` when `initialState.target === 'canva'`, and `local` otherwise. Do not derive it from `canvaTarget` after awaiting the network request; the target must match the state that initialized the hosted session.
+
+```js
+const initialState = remoteSnapshot();
+const initialPhoneRemoteTarget = initialState.target === 'canva' ? 'canva' : 'local';
+const result = await requestCloudRemote('start', { body: { state: initialState } });
+```
+
+- [ ] **Step 2: Set the active phone target before connecting the hosted presenter.**
+
+After the start response passes validation and its generation check, assign `phoneRemoteTarget = initialPhoneRemoteTarget` before setting `remoteActive = true` and before calling `connectMobileRemote()`. This ensures the first post-connect snapshot, later Canva readiness updates, and incoming phone commands all use the same target as the hosted session's initial state. Keep `local` as the target for the sample deck and PDFs.
+
+- [ ] **Step 3: Commit the hosted target routing fix.**
+
+```bash
+git add app.js docs/superpowers/plans/2026-10-15-cloud-canva-phone-control.md
+git commit -m "fix: preserve selected target in hosted sessions"
 ```
 
 ## Scope checks
