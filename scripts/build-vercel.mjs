@@ -24,6 +24,8 @@ for (const file of [
   'mobile-remote.css',
   'favicon.svg',
   'app.js',
+  'extension/shared/page-bridge.js',
+  'extension/shared/protocol.js',
   'assets/hand_landmarker.task',
 ]) {
   await copy(file);
