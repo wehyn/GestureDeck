@@ -12,7 +12,7 @@
 
 ## File map
 
-- `extension/shared/protocol.js` — central URL and message validation shared by the extension and presenter page.
+- `extension/shared/protocol.js` — URL and message validation shared by the extension service worker and presenter page.
 - `extension/shared/page-bridge.js` — presenter-page side of the extension bridge.
 - `extension/content/controller-bridge.js` — extension content script injected into the GestureDeck presenter workspace.
 - `extension/background/service-worker.js` — validates controller connections and routes messages to the selected Canva tab.
@@ -55,7 +55,7 @@ export function isGestureDeckControllerUrl(value) {
 
 - [ ] **Step 2: Use the helper at every bridge boundary.**
 
-In `extension/shared/page-bridge.js`, import the helper and calculate `available` with `isGestureDeckControllerUrl(`${origin}/`)`. In `extension/content/controller-bridge.js`, import the helper and replace the hostname-only startup condition with `isGestureDeckControllerUrl(location.href)`. In `extension/background/service-worker.js`, import the helper and validate `port.sender?.url` with it for both `runtime.onConnect` and controller requests. Keep same-window, exact-origin, message-shape, and action checks.
+In `extension/shared/page-bridge.js`, import the helper and calculate `available` with `isGestureDeckControllerUrl(`${origin}/`)`. In `extension/background/service-worker.js`, import the helper and validate `port.sender?.url` with it for both `runtime.onConnect` and controller requests. In `extension/content/controller-bridge.js`, keep the script self-contained because Chrome loads declarative content scripts as classic scripts, which cannot use a static ES module import. Replace the hostname-only startup condition with a local predicate that accepts only `/` or `/workspace.html` on `http://localhost:5173`, `http://127.0.0.1:5173`, or the exact origin `https://gesturedeck-two.vercel.app`, and rejects URL username/password. Keep same-window, exact-origin, message-shape, and action checks.
 
 - [ ] **Step 3: Declare only the production host in the extension manifest.**
 
