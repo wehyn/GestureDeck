@@ -194,7 +194,10 @@ class MemoryRedis {
           status: this.values.has(`${args[2]}${record.credential}`) ? 'connected' : 'reconnecting',
           ordinal: Number(record.ordinal) || 0,
         })).sort((left, right) => left.ordinal - right.ordinal || left.phoneId.localeCompare(right.phoneId))
-          .map(({ ordinal, ...record }) => record);
+          .map((record) => {
+            delete record.ordinal;
+            return record;
+          });
         this.#emit(keys[5], { type: 'phones', phones: visible }, args[7]);
       }
       return 'removed';

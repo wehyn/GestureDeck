@@ -38,6 +38,7 @@ export function isControllerRequest(value) {
     || typeof value.id !== 'string'
     || value.id.length < 1
     || value.id.length > 128
+    // eslint-disable-next-line no-control-regex -- reject control characters in controller IDs.
     || /[\s\u0000-\u001f\u007f]/.test(value.id)) return false;
   const keys = Object.keys(value).sort().join(',');
   if (value.command === 'status') return keys === 'command,id,source,type';
