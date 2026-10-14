@@ -103,7 +103,7 @@ Apply the same Canva shape and normalization in `src/cloud-remote-redis-server.j
 
 In `src/mobile-remote-session.js`'s `validCommandShape`, add `state.target !== 'canva' &&` to the existing `goTo` return expression; continue accepting its existing bounded `goTo` shape for decks and PDFs.
 
-In `src/cloud-remote-redis-server.js`'s `PHONE_COMMAND_SCRIPT`, replace the current single `goTo` bounds check with the following so Canva is rejected before reading its null total. Preserve previous/next relay and per-phone acknowledgement behavior.
+In `src/cloud-remote-redis-server.js`'s `PHONE_COMMAND_SCRIPT`, reject a command for Canva when `session.state.ready` is not `true`, before writing a dedupe key or enqueuing/publishing the event. Return a non-`ok` result so the existing handler sends `accepted: false`, matching the in-memory relay. Keep deck/PDF command behavior unchanged. Then replace the current single `goTo` bounds check with the following so Canva is rejected before reading its null total. Preserve previous/next relay and per-phone acknowledgement behavior.
 
 ```lua
 if ARGV[2] == 'goTo' then

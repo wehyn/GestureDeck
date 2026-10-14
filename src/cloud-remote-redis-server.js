@@ -162,6 +162,9 @@ local legacy = not found and session.phoneCredential == ARGV[1]
 if not found and not legacy then return 'invalid' end
 local leaseKey = legacy and KEYS[6] or KEYS[5]
 if redis.call('GET', leaseKey) ~= ARGV[7] then return 'invalid' end
+if session.state.target == 'canva' and session.state.ready ~= true then
+  return 'not-ready'
+end
 if ARGV[2] == 'goTo' then
   if session.state.target == 'canva' or tonumber(ARGV[3]) >= session.state.total then
     return 'out-of-range'
