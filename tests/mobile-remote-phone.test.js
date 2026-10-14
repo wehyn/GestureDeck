@@ -11,6 +11,7 @@ class FakeElement {
     this.id = id;
     this.textContent = '';
     this.value = '';
+    this.hidden = false;
     this.disabled = false;
     this.attributes = new Map();
     this.dataset = {};
@@ -191,9 +192,11 @@ test('valid invite pairs, stores its credential and label, and removes the fragm
   assert.equal(result.document.getElementById('previous-button').disabled, false);
 });
 
-test('hosted remote uses its legacy pairing protocol and accepts its response', () => {
+test('hosted remote sends metadata and shows the assigned phone identity', () => {
   const sessionId = '0123456789abcdef';
   const result = setup({
+    nickname: '  Alex  Phone ',
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
     locationExtras: {
       protocol: 'https:', host: 'gesturedeck.example', pathname: `/r/${sessionId}`,
       href: `https://gesturedeck.example/r/${sessionId}#invite-1`,
@@ -202,21 +205,26 @@ test('hosted remote uses its legacy pairing protocol and accepts its response', 
   result.document.getElementById('connect-button').dispatch('click');
 
   assert.equal(result.socket.url, `wss://gesturedeck.example/api/cloud-remote-ws?__gd_route=phone&session=${sessionId}`);
-  assert.equal(result.document.getElementById('device-nickname-field').hidden, true);
+  assert.equal(result.document.getElementById('device-nickname-field').hidden, false);
   result.socket.open();
-  assert.deepEqual(result.socket.sent, [{ type: 'pair', invite: 'invite-1' }]);
+  assert.deepEqual(result.socket.sent, [{
+    type: 'pair', invite: 'invite-1', nickname: 'Alex Phone', deviceType: 'iphone',
+  }]);
   result.socket.message({
-    type: 'paired', credential: 'cloud-phone-secret',
+    type: 'paired', credential: 'cloud-phone-secret', phoneId: 'cloud-phone-id',
+    label: 'Alex Phone', deviceType: 'iphone',
     state: { index: 2, total: 18, busy: false },
   });
 
   assert.equal(result.sessionStorage.values.get(`phoneSessionCredential:${sessionId}`), 'cloud-phone-secret');
+  assert.equal(result.sessionStorage.values.get(`phoneSessionLabel:${sessionId}`), 'Alex Phone');
+  assert.equal(result.document.getElementById('connected-as').textContent, 'Connected as Alex Phone');
   assert.equal(result.document.getElementById('slide-position').textContent, '3 / 18');
   assert.match(result.document.getElementById('connection-status').textContent, /connected/i);
   assert.deepEqual(result.history.calls, [[null, '', `/r/${sessionId}`]]);
 });
 
-test('hosted remote resumes with the legacy cloud response shape', () => {
+test('hosted remote resumes legacy sessions with the old cloud response shape', () => {
   const sessionId = 'fedcba9876543210';
   const result = setup({
     hash: '',

@@ -88,10 +88,6 @@ export function mountMobileRemotePhone({
   const elements = [statusElement, positionElement, previousButton, nextButton, slideNumber, goButton, disconnectButton, actionStatus, pairingPanel, nicknameField, nicknameInput, connectButton, connectedAsElement];
   if (elements.some((element) => !element)) throw new TypeError('Phone remote page is missing required controls');
 
-  // Hosted V1 has a legacy single-phone relay with no nickname or device-list
-  // fields. Keep its pairing screen honest; the local remote supports names.
-  if (cloudSessionId) nicknameField.hidden = true;
-
   const timerHost = document.defaultView ?? globalThis;
   const schedule = typeof timerHost.setTimeout === 'function'
     ? timerHost.setTimeout.bind(timerHost)
@@ -428,12 +424,12 @@ export function mountMobileRemotePhone({
       if (credential) send({ type: 'resume', credential }, nextSocket);
       else if (invite && pairAfterOpen) {
         pairAfterOpen = false;
-        const message = { type: 'pair', invite };
-        if (!cloudSessionId) {
-          message.nickname = pendingNickname;
-          message.deviceType = detectDeviceType(navigatorImpl?.userAgent);
-        }
-        send(message, nextSocket);
+        send({
+          type: 'pair',
+          invite,
+          nickname: pendingNickname,
+          deviceType: detectDeviceType(navigatorImpl?.userAgent),
+        }, nextSocket);
       }
       else {
         terminal = true;
