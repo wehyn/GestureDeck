@@ -156,7 +156,10 @@ let remoteActive = false;
 let remoteStarting = false;
 let remoteAuthenticated = false;
 let remoteGeneration = 0;
+// Keep stop requests distinct across replacements and coalesce duplicates for one session.
+let activeRemoteSessionKey = 0;
 let remoteStopPromise = null;
+const remoteStopRequests = new Map();
 let cloudRemoteSession = null;
 let closingMobileRemote = false;
 let pairedPhones = [];
@@ -921,6 +924,7 @@ async function startMobileRemote() {
   }
   const target = canvaTarget.connected ? 'canva' : 'local';
   const generation = ++remoteGeneration;
+  activeRemoteSessionKey += 1;
   remoteStarting = true;
   pairedPhones = [];
   pairingInviteExpired = false;
@@ -983,6 +987,7 @@ async function startMobileRemote() {
 async function startCloudMobileRemote() {
   if (!cloudExperience || remoteActive || remoteStarting) return;
   const generation = ++remoteGeneration;
+  activeRemoteSessionKey += 1;
   remoteStarting = true;
   updatePairingStartButton();
   show(elements.newPairingLink, false);
@@ -1068,7 +1073,6 @@ async function renewPairingInvite() {
 }
 
 async function stopMobileRemote({ keepalive = false, force = false, stopSession = true } = {}) {
-  if (remoteStopPromise) return remoteStopPromise;
   const shouldPostStop = stopSession && (force || remoteActive || remoteStarting);
   ++remoteGeneration;
   closingMobileRemote = true;
@@ -1080,15 +1084,26 @@ async function stopMobileRemote({ keepalive = false, force = false, stopSession 
   resetPairingUi();
   const sessionToStop = cloudRemoteSession;
   cloudRemoteSession = null;
-  if (!shouldPostStop) return;
-  remoteStopPromise = (cloudExperience
-    ? sessionToStop
-      ? requestCloudRemote('stop', { body: sessionToStop, keepalive })
-      : Promise.resolve()
-    : requestMobileRemote('stop', { method: 'POST', body: {}, keepalive }))
+  const stopSessionKey = `${cloudExperience ? 'cloud' : 'local'}:${activeRemoteSessionKey}`;
+  const existingStopPromise = remoteStopRequests.get(stopSessionKey);
+  if (!shouldPostStop || existingStopPromise) return existingStopPromise;
+
+  const previousStopPromise = remoteStopPromise;
+  const stopRequest = (previousStopPromise ?? Promise.resolve())
     .catch(() => {})
-    .finally(() => { remoteStopPromise = null; });
-  return remoteStopPromise;
+    .then(() => (cloudExperience
+      ? sessionToStop
+        ? requestCloudRemote('stop', { body: sessionToStop, keepalive })
+        : Promise.resolve()
+      : requestMobileRemote('stop', { method: 'POST', body: {}, keepalive })))
+    .catch(() => {});
+  remoteStopPromise = stopRequest;
+  remoteStopRequests.set(stopSessionKey, stopRequest);
+  stopRequest.then(() => {
+    if (remoteStopRequests.get(stopSessionKey) === stopRequest) remoteStopRequests.delete(stopSessionKey);
+    if (remoteStopPromise === stopRequest) remoteStopPromise = null;
+  });
+  return stopRequest;
 }
 
 async function copyPairingUrl() {
