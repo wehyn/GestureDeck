@@ -1,6 +1,16 @@
-import { isGestureDeckControllerUrl } from '../shared/protocol.js';
+function isGestureDeckControllerPage(value) {
+  try {
+    const url = new URL(value);
+    return !url.username && !url.password
+      && ['/', '/workspace.html'].includes(url.pathname)
+      && ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://gesturedeck-two.vercel.app']
+        .includes(url.origin);
+  } catch {
+    return false;
+  }
+}
 
-if (isGestureDeckControllerUrl(location.href)) {
+if (isGestureDeckControllerPage(location.href)) {
   const origin = location.origin;
   let port;
 
