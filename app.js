@@ -907,7 +907,7 @@ function handleMobileRemoteConnection(event, generation) {
   }
   if (event.type === 'closed' || event.type === 'sessionEnded') {
     if (!remoteActive) return;
-    void stopMobileRemote({ force: true });
+    void stopMobileRemote({ force: true, stopSession: !cloudExperience });
   }
 }
 
@@ -1067,9 +1067,9 @@ async function renewPairingInvite() {
   }
 }
 
-async function stopMobileRemote({ keepalive = false, force = false } = {}) {
+async function stopMobileRemote({ keepalive = false, force = false, stopSession = true } = {}) {
   if (remoteStopPromise) return remoteStopPromise;
-  const shouldPostStop = force || remoteActive || remoteStarting;
+  const shouldPostStop = stopSession && (force || remoteActive || remoteStarting);
   ++remoteGeneration;
   closingMobileRemote = true;
   const client = mobileRemoteClient;
@@ -1078,9 +1078,9 @@ async function stopMobileRemote({ keepalive = false, force = false } = {}) {
   closingMobileRemote = false;
   if (elements.pairingInterface) elements.pairingInterface.disabled = false;
   resetPairingUi();
-  if (!shouldPostStop) return;
   const sessionToStop = cloudRemoteSession;
   cloudRemoteSession = null;
+  if (!shouldPostStop) return;
   remoteStopPromise = (cloudExperience
     ? sessionToStop
       ? requestCloudRemote('stop', { body: sessionToStop, keepalive })
