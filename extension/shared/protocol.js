@@ -25,7 +25,7 @@ export function isLoopbackControllerUrl(value) {
     return url.protocol === 'http:'
       && ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(url.hostname)
       && url.port === String(DEFAULT_CONTROLLER_PORT)
-      && url.pathname === '/';
+      && ['/', '/workspace.html'].includes(url.pathname);
   } catch {
     return false;
   }
