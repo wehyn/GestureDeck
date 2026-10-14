@@ -67,6 +67,7 @@ export async function openPdfPresentation(file, {
 
   let activeRender = null;
   let lastCanvas = null;
+  const renderedPages = new Map();
   let generation = 0;
   let destroyed = false;
 
@@ -103,13 +104,51 @@ export async function openPdfPresentation(file, {
         canvas.height = Math.max(1, Math.ceil(viewport.height));
         canvas.style.width = `${cssWidth}px`;
         canvas.style.height = `${cssHeight}px`;
+        const cacheKey = `${pageNumber}:${cssWidth}:${cssHeight}:${canvas.width}:${canvas.height}:${pixelRatio}`;
+        const cachedCanvas = renderedPages.get(cacheKey);
         const context = canvas.getContext('2d');
         if (!context) throw new Error('Canvas rendering is unavailable.');
+        if (cachedCanvas) {
+          renderedPages.delete(cacheKey);
+          renderedPages.set(cacheKey, cachedCanvas);
+          context.drawImage(cachedCanvas, 0, 0);
+          lastCanvas = canvas;
+          return true;
+        }
         const task = page.render({ canvasContext: context, viewport });
         activeRender = task;
         await task.promise;
         if (currentGeneration !== generation || destroyed) return false;
         lastCanvas = canvas;
+        let cachedCopy;
+        try {
+          cachedCopy = globalThis.document.createElement('canvas');
+          cachedCopy.width = canvas.width;
+          cachedCopy.height = canvas.height;
+          cachedCopy.style.width = canvas.style.width;
+          cachedCopy.style.height = canvas.style.height;
+          const cacheContext = cachedCopy.getContext('2d');
+          if (cacheContext) {
+            cacheContext.drawImage(canvas, 0, 0);
+            renderedPages.set(cacheKey, cachedCopy);
+            if (renderedPages.size > 2) {
+              const oldestKey = renderedPages.keys().next().value;
+              const oldestCanvas = renderedPages.get(oldestKey);
+              renderedPages.delete(oldestKey);
+              oldestCanvas.width = 0;
+              oldestCanvas.height = 0;
+            }
+          } else {
+            cachedCopy.width = 0;
+            cachedCopy.height = 0;
+          }
+        } catch {
+          // Cache copies are optional; keep the completed render if allocation fails.
+          if (cachedCopy) {
+            cachedCopy.width = 0;
+            cachedCopy.height = 0;
+          }
+        }
         return true;
       } catch (error) {
         if (currentGeneration !== generation || destroyed || error?.name === 'RenderingCancelledException') return false;
@@ -129,6 +168,11 @@ export async function openPdfPresentation(file, {
         lastCanvas.width = 0;
         lastCanvas.height = 0;
       }
+      for (const canvas of renderedPages.values()) {
+        canvas.width = 0;
+        canvas.height = 0;
+      }
+      renderedPages.clear();
       await loadingTask.destroy();
     },
   };
