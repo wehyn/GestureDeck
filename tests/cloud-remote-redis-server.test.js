@@ -138,7 +138,9 @@ class MemoryRedis {
       if (!phone) return 'invalid';
       this.values.set(keys[1], args[1]);
       this.values.delete(keys[2]);
-      return JSON.stringify({ phoneId: phone.phoneId, label: phone.label, deviceType: phone.deviceType, state: session.state });
+      const latest = this.streams.get(keys[3])?.at(-1);
+      const cursor = latest?.id ?? '0-0';
+      return JSON.stringify({ phoneId: phone.phoneId, label: phone.label, deviceType: phone.deviceType, state: session.state, cursor });
     }
 
     if (operation === 'PHONE_COMMAND') {

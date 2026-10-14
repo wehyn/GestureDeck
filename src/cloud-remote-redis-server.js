@@ -140,8 +140,11 @@ end
 if not phone then return 'invalid' end
 redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
 redis.call('DEL', KEYS[3])
+local latest = redis.call('XREVRANGE', KEYS[4], '+', '-', 'COUNT', '1')
+local cursor = '0-0'
+if latest[1] then cursor = latest[1][1] end
 return cjson.encode({state = session.state, phoneId = phoneId,
-  label = phone.label or 'Phone', deviceType = phone.deviceType or 'phone'})
+  label = phone.label or 'Phone', deviceType = phone.deviceType or 'phone', cursor = cursor})
 `;
 
 const PHONE_COMMAND_SCRIPT = `
@@ -908,6 +911,7 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
     let authTimer;
     let closed = false;
     let unsubscribeEvents;
+    let pendingDisconnect;
     const seenEvents = new Set();
     const sendEvent = (eventId, message) => {
       if (seenEvents.has(eventId)) return;
@@ -930,6 +934,7 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
       sockets.delete(socket);
       if (admitted) {
         clearLocalPeer(id, 'phone', socket, phoneId);
+        await pendingDisconnect?.catch(() => {});
         const released = await redis.eval(RELEASE_PHONE_SCRIPT, [leaseKey], [connectionId]).catch(() => 0);
         if (Number(released)) await publishPhoneList(id).catch(() => {});
       }
@@ -1004,19 +1009,20 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
           if (message.type === 'resume' && Object.keys(message).sort().join(',') === 'credential,type' && typeof message.credential === 'string') {
             credential = message.credential;
             leaseKey = key(id, `phone-lease:${credential}`);
-            const identity = phoneIdentityFromScriptResult(await redis.eval(PHONE_RESUME_SCRIPT,
-              [sessionKey, leaseKey, key(id, 'phone-lease')],
+            const resumeResult = objectFromScriptResult(await redis.eval(PHONE_RESUME_SCRIPT,
+              [sessionKey, leaseKey, key(id, 'phone-lease'), phoneEvents],
               [credential, connectionId, String(LEASE_TTL_SECONDS), String(Date.now())]));
-            if (!identity) {
+            const identity = phoneIdentityFromScriptResult(resumeResult);
+            if (!identity || typeof resumeResult.cursor !== 'string') {
               socket.send({ type: 'resumeRejected', reason: 'invalid' });
               socket.close(1008, 'Invalid credential');
               return;
             }
             phoneId = identity.phoneId;
+            cursor = resumeResult.cursor;
             admitted = true;
             localPeers(id).phones.set(phoneId, socket);
             clearTimeout(authTimer);
-            cursor = await latestEventId(redis, phoneEvents);
             unsubscribeEvents = await subscribeEvents(redis, channelKey(id, 'phone'), (value) => {
               const event = readEventEnvelope(value);
               if (event) sendEvent(event.id, event.message);
@@ -1067,12 +1073,18 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
             await publish(redis, presenterEvents, channelKey(id, 'presenter'), command);
           }
         } else if (message.type === 'disconnect') {
-          const removed = await redis.eval(REMOVE_PHONE_SCRIPT,
-            [sessionKey, key(id, 'phone-lease'), key(id, 'presenter-lease')],
-            [phoneId, credential, key(id, 'phone-lease:'), String(Date.now()), connectionId, '',
-              String(SESSION_TTL_SECONDS)]);
-          if (removed === 'removed') await publishPhoneList(id);
-          socket.close(1000, 'Phone disconnected');
+          pendingDisconnect = (async () => {
+            const removed = await redis.eval(REMOVE_PHONE_SCRIPT,
+              [sessionKey, key(id, 'phone-lease'), key(id, 'presenter-lease')],
+              [phoneId, credential, key(id, 'phone-lease:'), String(Date.now()), connectionId, '',
+                String(SESSION_TTL_SECONDS)]);
+            if (removed === 'removed') await publishPhoneList(id);
+          })();
+          try {
+            await pendingDisconnect;
+          } finally {
+            socket.close(1000, 'Phone disconnected');
+          }
         }
       } catch { socket.close(1011, 'Relay storage unavailable'); }
     });
