@@ -65,6 +65,7 @@ local sessionTtl = tonumber(ARGV[5])
 if tonumber(session.expiresAt or 0) > 0 then
   sessionTtl = math.max(1, math.ceil((session.expiresAt - tonumber(ARGV[3])) / 1000))
 end
+if ARGV[1] == '' or tonumber(session.pairAttempts or 0) >= 5 then return 'invalid' end
 if session.invite ~= ARGV[1] then
   session.pairAttempts = (session.pairAttempts or 0) + 1
   if session.pairAttempts >= 5 then session.invite = '' end

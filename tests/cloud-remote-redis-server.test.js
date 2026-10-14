@@ -83,6 +83,7 @@ class MemoryRedis {
       if (!session.active) return 'ended';
       if (!this.values.has(keys[1])) return 'host-unavailable';
       if (session.inviteExpiresAt < Number(args[2])) return 'expired';
+      if (args[0] === '' || (session.pairAttempts ?? 0) >= 5) return 'invalid';
       if (session.invite !== args[0]) {
         session.pairAttempts = (session.pairAttempts ?? 0) + 1;
         if (session.pairAttempts >= 5) session.invite = '';
