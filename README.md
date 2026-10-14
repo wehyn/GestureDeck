@@ -1,6 +1,6 @@
 # GestureDeck
 
-GestureDeck lets you present its sample deck or a PDF from your browser. Use the local version for hands-free camera gestures, or use a phone as a slide remote. PDF pages are rendered in the presenter’s browser; the cloud remote relays pairing and slide controls only. Camera frames and PDF files are not uploaded.
+GestureDeck lets you present its sample deck or a PDF from your browser. Use the local version for hands-free camera gestures, or use a phone as a slide remote. PDF pages are rendered in the presenter’s browser; the cloud remote relays pairing, target readiness, and slide controls only. Camera frames, PDF files, slide content, and Canva credentials stay in the presenter’s browser.
 
 ## Submission links
 
@@ -62,7 +62,7 @@ Model source: [MediaPipe Hand Landmarker float16 model](https://storage.googleap
 ## APIs and cloud services
 
 - **Runtime browser APIs:** `getUserMedia` for camera capture, Canvas for preview and PDF pages, the Fullscreen API for presenting, and `localStorage` for gesture settings.
-- **Runtime cloud services and hosted AI APIs:** No hosted AI APIs are used. Hand inference, swipe recognition, and PDF rendering run on the device. When deployed over HTTPS, the app server can relay temporary phone pairing and slide navigation messages; it does not receive PDF bytes, slide text, rendered pages, notes, or camera data.
+- **Runtime cloud services and hosted AI APIs:** No hosted AI APIs are used. Hand inference, swipe recognition, and PDF rendering run on the device. When deployed over HTTPS, the app server can relay temporary phone pairing, target readiness, and slide navigation messages for a selected Canva tab; it does not receive PDF bytes, slide content, rendered pages, notes, Canva credentials, or camera data.
 - **Services used outside the running app:** GitHub hosts this public repository; npm may be needed to download dependencies during installation. YouTube hosts the demo video and LinkedIn hosts the video post; viewing them requires internet access.
 
 ## Existing code and assets
@@ -111,21 +111,20 @@ The phone receives only the slide index and count when available, busy state, ta
 
 ## Use your phone with live Canva
 
-Live Canva control uses the GestureDeck Chrome extension and the local QR phone remote. Hand-camera setup is not needed.
+Live Canva control uses the GestureDeck Chrome extension with either the local GestureDeck workspace or the hosted workspace at `https://gesturedeck-two.vercel.app/workspace.html?experience=cloud`. Hand-camera setup is not needed.
 
-1. Start GestureDeck with `npm run dev` and open `http://localhost:5173` or `http://127.0.0.1:5173` on the presenter computer.
-2. In Chrome, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select this repository's `extension/` folder.
-3. Open a Canva design in **Present** or **View** mode. Click the GestureDeck extension icon and choose **Connect this presentation**.
-4. In GestureDeck, choose **Connect phone**, select the private network interface used by the phone, and show the QR code.
-5. Scan the QR code on the same trusted Wi-Fi or Tailscale network. Use the phone's **Previous** and **Next** buttons to control Canva.
+1. In Chrome, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select this repository's `extension/` folder. If the extension is already loaded, click **Reload**.
+2. Open a Canva design in **Present** or **View** mode. Click the GestureDeck extension icon and choose **Connect this presentation**.
+3. For local phone pairing, start GestureDeck with `npm run dev`, open `http://localhost:5173` or `http://127.0.0.1:5173` on the presenter computer, and follow [Use the local phone remote](#use-the-local-phone-remote). Phones must be on the same trusted Wi-Fi or Tailscale network.
+4. For hosted phone pairing, open `https://gesturedeck-two.vercel.app/workspace.html?experience=cloud` in the same Chrome profile and choose **Connect phone**. Share its QR code or link with phones on any network; the hosted session supports up to eight phones.
 
-The extension works with a presenter page at the existing local origin `http://localhost:5173` or `http://127.0.0.1:5173`. Canva editing mode is refused. Canva has no reported slide number or count, so the phone shows only readiness and Previous/Next controls. The extension does not request camera access. If the selected tab leaves Present or View mode, phone navigation is disabled. Hosted phone sessions do not control Canva.
+The extension works with the local origins `http://localhost:5173` and `http://127.0.0.1:5173`, and with the hosted workspace URL above. Canva editing mode is refused. Canva has no reported slide number or count, so the phone shows readiness and **Previous**/**Next** controls only. The extension does not request camera access. If the selected tab leaves Present or View mode, phone navigation is disabled. For hosted sessions, the relay carries readiness and **Previous**/**Next** for the selected Canva tab; slide content and Canva credentials remain in the presenter’s browser.
 
 ## Use the cloud phone remote
 
-Open the hosted GestureDeck home page over HTTPS and choose **Start presenting**. The presenter chooses a sample deck or a PDF in that browser, then pairs up to eight phones using the QR code or link. The phones can be on another network. The server relays pairing and slide controls; the PDF stays in the presenter's browser. Canva is not available in hosted sessions.
+Open the hosted GestureDeck home page over HTTPS and choose **Start presenting**. The presenter can choose a sample deck or a PDF in that browser, then pair up to eight phones using the QR code or link. The phones can be on another network. The server relays pairing and slide controls; the PDF stays in the presenter's browser. For Canva, connect the selected Canva tab with the extension as described above. Cloud sessions relay that tab’s readiness and **Previous**/**Next** only; slide content and Canva credentials stay in the presenter's browser.
 
-Cloud sessions and short-lived relay messages are stored in Redis for up to four hours so the presenter and phones can connect to separate server instances. The Redis store contains pairing credentials and slide navigation state; it never contains the PDF, slide content, rendered pages, notes, or camera data. The presenter can renew the invite while keeping paired phones connected, disconnect one phone, or end the session. There are no accounts or shared presenter roles. The reverse proxy must preserve same-origin requests and forward WebSocket upgrades. Use HTTPS so phone connections use secure WebSockets.
+Cloud sessions and short-lived relay messages are stored in Redis for up to four hours so the presenter and phones can connect to separate server instances. The Redis store contains pairing credentials, target readiness, phone metadata, and temporary navigation state; it never contains the PDF, slide content, rendered pages, notes, Canva credentials, or camera data. The presenter can renew the invite while keeping paired phones connected, disconnect one phone, or end the session. There are no accounts or shared presenter roles. The reverse proxy must preserve same-origin requests and forward WebSocket upgrades. Use HTTPS so phone connections use secure WebSockets.
 
 For Vercel, `npm run build:vercel` copies only browser assets to `dist/`; `vercel.json` sets that directory as the static output and routes cloud relay requests to the Node.js WebSocket function. Connect an Upstash Redis database to the Vercel project and make sure the deployment has `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` available. The legacy Vercel KV names `KV_REST_API_URL` and `KV_REST_API_TOKEN` are also supported. If these variables are missing, cloud pairing returns a storage-unavailable error; local presentation and camera gestures still work.
 
@@ -133,7 +132,7 @@ To enable Redis in Vercel, open the project's **Storage** or **Marketplace** pag
 
 ## Current prototype boundary
 
-GestureDeck controls its built-in sample deck or imported PDFs in the local page. The Chrome extension adds phone-based Previous/Next control for a selected live Canva presentation. It does not control native Keynote, PowerPoint, or other presentation apps.
+GestureDeck controls its built-in sample deck or imported PDFs in the local page. The Chrome extension adds phone-based Previous/Next control for a selected live Canva presentation through either the local or hosted workspace. It does not control native Keynote, PowerPoint, or other presentation apps.
 
 ## Privacy and local model notes
 
