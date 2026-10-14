@@ -96,11 +96,10 @@ Change the signature and stop decision in `stopMobileRemote` to:
 
 ```js
 async function stopMobileRemote({ keepalive = false, force = false, stopSession = true } = {}) {
-  if (remoteStopPromise) return remoteStopPromise;
   const shouldPostStop = stopSession && (force || remoteActive || remoteStarting);
 ```
 
-Keep the UI reset and local WebSocket cleanup in this function. Capture `cloudRemoteSession` and clear it even when `stopSession` is false, so automatic cleanup cannot leave stale session data. Only post the stop request when `shouldPostStop` is true.
+Always complete the UI reset and local WebSocket cleanup, even when another stop request is pending. Capture `cloudRemoteSession` and clear it even when `stopSession` is false, so automatic cleanup cannot leave stale session data. Only post the stop request when `shouldPostStop` is true. Coalesce duplicate stop requests for the same session and queue a replacement session's request behind an earlier pending stop. Ensure an older request cannot clear the shared pending reference for a newer request.
 
 - [ ] **Step 2: Prevent hosted close notifications from stopping a replacement**
 
