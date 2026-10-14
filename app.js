@@ -1032,10 +1032,22 @@ async function startCloudMobileRemote() {
       void requestCloudRemote('stop', { body: startedSession, keepalive: pageIsHiding }).catch(() => {});
     }
     if (generation !== remoteGeneration) return;
+    closingMobileRemote = true;
+    const failedClient = mobileRemoteClient;
+    mobileRemoteClient = null;
+    try {
+      failedClient?.close();
+    } catch {
+      // Keep the startup error as the reported failure.
+    } finally {
+      closingMobileRemote = false;
+    }
     remoteStarting = false;
     remoteActive = false;
     remoteAuthenticated = false;
     cloudRemoteSession = null;
+    phoneRemoteTarget = null;
+    renderTargetStatus();
     clearPairingMaterial();
     show(elements.newPairingLink, false);
     show(elements.disconnectPhone, false);

@@ -159,7 +159,7 @@ const result = await requestCloudRemote('start', { body: { state: initialState }
 
 - [ ] **Step 2: Set the active phone target before connecting the hosted presenter.**
 
-After the start response passes validation and its generation check, assign `phoneRemoteTarget = initialPhoneRemoteTarget` before setting `remoteActive = true` and before calling `connectMobileRemote()`. Call `renderTargetStatus()` after activating the session and before connecting so the presenter display reflects the pinned target even if Canva readiness changed while the start request was pending. This ensures the first post-connect snapshot, later Canva readiness updates, and incoming phone commands all use the same target as the hosted session's initial state. Keep `local` as the target for the sample deck and PDFs.
+After the start response passes validation and its generation check, assign `phoneRemoteTarget = initialPhoneRemoteTarget` before setting `remoteActive = true` and before calling `connectMobileRemote()`. Call `renderTargetStatus()` after activating the session and before connecting so the presenter display reflects the pinned target even if Canva readiness changed while the start request was pending. If setup then throws synchronously, close and clear any partially created phone client using the existing closing-callback guard, clear `phoneRemoteTarget`, and render the inactive target again. This ensures the first post-connect snapshot, later Canva readiness updates, incoming phone commands, and failed-start recovery all remain consistent with the hosted session's target. Keep `local` as the target for the sample deck and PDFs.
 
 - [ ] **Step 3: Commit the hosted target routing fix.**
 
