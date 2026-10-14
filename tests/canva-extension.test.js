@@ -183,12 +183,12 @@ test('extension protocol allows only loopback controller pages and Canva navigat
   assert.equal(presentationKeyForAction('goTo'), null);
 });
 
-test('extension permissions stay limited to the selected tab and loopback controller', async () => {
+test('extension permissions stay limited to the selected tab and approved controller origins', async () => {
   const manifest = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
   assert.equal(manifest.manifest_version, 3);
   assert.deepEqual([...manifest.permissions].sort(), ['activeTab', 'scripting', 'storage']);
   assert.deepEqual(manifest.content_scripts[0].matches.sort(), [
-    'http://127.0.0.1/*', 'http://localhost/*',
+    'http://127.0.0.1/*', 'http://localhost/*', 'https://gesturedeck-two.vercel.app/*',
   ]);
   assert.equal(manifest.action.default_popup, 'popup/popup.html');
   assert.equal(manifest.background.service_worker, 'background/service-worker.js');
