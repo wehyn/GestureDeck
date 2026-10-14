@@ -941,7 +941,7 @@ async function startMobileRemote() {
     });
     serverStarted = true;
     if (generation !== remoteGeneration) {
-      void requestMobileRemote('stop', { method: 'POST', body: {}, keepalive: pageIsHiding }).catch(() => {});
+      // stopMobileRemote already queued cleanup when it invalidated this start.
       return;
     }
     if (typeof result.hostCredential !== 'string' || !result.hostCredential
@@ -962,14 +962,10 @@ async function startMobileRemote() {
       onConnection: (event) => handleMobileRemoteConnection(event, generation),
     });
   } catch (error) {
-    if (serverStarted) {
-      closingMobileRemote = true;
-      mobileRemoteClient?.close();
-      mobileRemoteClient = null;
-      closingMobileRemote = false;
-      void requestMobileRemote('stop', { method: 'POST', body: {}, keepalive: pageIsHiding }).catch(() => {});
-    }
     if (generation !== remoteGeneration) return;
+    if (serverStarted) {
+      void stopMobileRemote({ force: true, keepalive: pageIsHiding });
+    }
     remoteStarting = false;
     remoteActive = false;
     remoteAuthenticated = false;
