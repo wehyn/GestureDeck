@@ -23,6 +23,17 @@
         <p id="connection-status" class="connection-copy" role="status" aria-live="polite">Connecting to presenter…</p>
       </section>
 
+      <section id="pairing-panel" class="pairing-panel" aria-labelledby="pairing-heading">
+        <p class="position-label">JOIN THIS PRESENTATION</p>
+        <h2 id="pairing-heading">Connect your phone</h2>
+        <label for="device-nickname">Name on the presenter’s phone list <span>(optional)</span></label>
+        <input id="device-nickname" name="device-nickname" type="text" maxlength="32" autocomplete="nickname" autocapitalize="words" placeholder="For example, Alex’s phone" aria-describedby="nickname-help">
+        <p id="nickname-help" class="pairing-help">Leave it blank to use a device label. It appears in the presenter list and on this phone after connection.</p>
+        <button id="connect-button" class="connect-button" type="button">Connect</button>
+      </section>
+
+      <p id="connected-as" class="connected-as" role="status" aria-live="polite" hidden></p>
+
       <section class="controller" aria-label="Presentation controls">
         <div class="position-block" aria-live="polite">
           <span class="position-label">CURRENT SLIDE</span>

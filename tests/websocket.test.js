@@ -243,7 +243,7 @@ test('performs a valid RFC 6455 upgrade and exchanges JSON text frames', { skip:
   const client = await upgradedClient(server.port);
   try {
     assert.match(client.response, /^HTTP\/1\.1 101 Switching Protocols/m);
-    assert.match(client.response, /Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=/i);
+    assert.ok(client.response.includes('Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo='));
     assert.match(client.response, /Upgrade: websocket/i);
 
     const receivedMessage = once(server.connections[0].connection, 'message');

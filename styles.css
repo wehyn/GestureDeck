@@ -748,6 +748,107 @@ html[data-experience="cloud"] .pairing-interface-row {
   flex: 0 0 auto;
 }
 
+.paired-phones-panel {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f5f4ed;
+}
+
+.paired-phones-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.paired-phones-heading h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  letter-spacing: -.01em;
+}
+
+.paired-phones-heading > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.paired-phones-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.paired-phones-list {
+  display: grid;
+  gap: 7px;
+  max-height: min(250px, 32vh);
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.paired-phone-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0 0;
+  border-top: 1px solid var(--line);
+}
+
+.paired-phone-info {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.paired-phone-label {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.paired-phone-type {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.paired-phone-status {
+  color: #426746;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.paired-phone-status[data-state="reconnecting"] { color: #80552a; }
+
+.paired-phone-remove {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  color: var(--ink);
+  background: #fffefa;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.paired-phone-remove:hover { background: #ebece3; }
+.paired-phone-remove:focus-visible { outline: 3px solid #315c85; outline-offset: 2px; }
+
 .pairing-dialog-actions {
   justify-content: flex-start;
   flex-wrap: wrap;
