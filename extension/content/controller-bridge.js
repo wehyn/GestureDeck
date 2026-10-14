@@ -1,5 +1,5 @@
 if ((location.hostname === '127.0.0.1' || location.hostname === 'localhost')
-  && location.pathname === '/') {
+  && ['/', '/workspace.html'].includes(location.pathname)) {
   const origin = location.origin;
   let port;
 

@@ -56,24 +56,25 @@ class FakeElement {
 }
 
 test('session state updates leave its persistent indicator element intact', async () => {
-  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const html = await readFile(new URL('../workspace.html', import.meta.url), 'utf8');
   assert.match(html, /class="session-state">\s*<span class="state-dot" aria-hidden="true"><\/span>\s*<span id="session-state">IDLE<\/span>/);
 });
 
-test('primary setup action precedes the deck and optional controls', async () => {
-  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-  const compactActionIndex = html.indexOf('id="compact-start-setup"');
-  assert.ok(compactActionIndex >= 0 && compactActionIndex < html.indexOf('class="deck-panel"'));
+test('deck selection precedes setup and optional controls', async () => {
+  const html = await readFile(new URL('../workspace.html', import.meta.url), 'utf8');
+  const deckIndex = html.indexOf('class="deck-panel"');
+  const sessionIndex = html.indexOf('class="session-panel"');
   const actionIndex = html.indexOf('class="session-actions"');
+  assert.ok(deckIndex >= 0 && deckIndex < sessionIndex);
+  assert.ok(sessionIndex < actionIndex);
   assert.ok(actionIndex < html.indexOf('class="camera-card"'));
   assert.ok(actionIndex < html.indexOf('class="session-settings"'));
 });
 
-test('compact setup CTA is visible on stacked layouts while the panel copy is hidden', async () => {
+test('workspace stacks presentation and controls at tablet widths', async () => {
   const css = await readFile(new URL('../styles.css', import.meta.url), 'utf8');
   const tabletStyles = css.slice(css.indexOf('@media (max-width: 860px)'), css.indexOf('@media (max-width: 620px)'));
-  assert.match(tabletStyles, /\.compact-start-setup:not\(\[hidden\]\)\s*\{\s*display:\s*flex;/);
-  assert.match(tabletStyles, /\.session-actions #start-setup\s*\{\s*display:\s*none;/);
+  assert.match(tabletStyles, /\.workspace-grid\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\);/);
 });
 
 test('client controller renders deck settings and progress without requesting camera before setup', async () => {
@@ -85,7 +86,7 @@ test('client controller renders deck settings and progress without requesting ca
     'gesture-toast', 'preview-toggle', 'target-status', 'gesture-sensitivity',
     'gesture-sensitivity-value', 'reverse-mapping', 'session-state', 'camera-status-detail',
     'left-gesture-result', 'right-gesture-result', 'reset-settings', 'camera-status-copy', 'camera-status-badge',
-    'compact-start-setup',
+    'setup-hint',
     'camera-picker', 'camera-selection',
   ];
   const elements = new Map(ids.map((id) => [id, new FakeElement()]));
@@ -154,18 +155,18 @@ test('client controller renders deck settings and progress without requesting ca
     assert.equal(cameraRequests, 0);
     assert.equal(elements.get('session-state').textContent, 'IDLE');
     assert.equal(elements.get('camera-status-detail').textContent, 'Off');
-    assert.equal(elements.get('camera-status-copy').textContent, 'Nothing is being captured.');
+    assert.equal(elements.get('camera-status-copy').textContent, 'Starts when you begin setup.');
     assert.equal(elements.get('camera-status-badge').textContent, 'OFF');
     assert.equal(elements.get('target-status').textContent, 'Sample deck · browser demo');
-    assert.equal(elements.get('compact-start-setup').hidden, false);
+    assert.equal(elements.get('start-setup').hidden, false);
     assert.equal(typeof app.renderCameraState, 'function');
     app.renderCameraState('active');
     assert.equal(elements.get('camera-status').textContent, 'Camera on · Local processing');
     assert.equal(elements.get('camera-status-detail').textContent, 'On · local only');
-    assert.equal(elements.get('camera-status-copy').textContent, 'Frames stay on this device. No video is saved or uploaded.');
+    assert.equal(elements.get('camera-status-copy').textContent, 'On-device only.');
     assert.equal(elements.get('camera-status-badge').textContent, 'ON');
     app.renderCameraState('off');
-    assert.equal(elements.get('camera-status-copy').textContent, 'Nothing is being captured.');
+    assert.equal(elements.get('camera-status-copy').textContent, 'Starts when you begin setup.');
     assert.equal(elements.get('gesture-sensitivity').value, '14');
     assert.equal(elements.get('gesture-sensitivity-value').textContent, '14%');
     assert.equal(elements.get('reverse-mapping').getAttribute('aria-pressed'), 'false');
@@ -253,7 +254,7 @@ test('client controller renders deck settings and progress without requesting ca
     latestTimeoutCallback();
     assert.equal(elements.get('gesture-toast').hidden, true);
 
-    const startingRequest = elements.get('compact-start-setup').dispatch('click');
+    const startingRequest = elements.get('start-setup').dispatch('click');
     assert.equal(cameraRequests, 1);
     assert.equal(elements.get('session-state').textContent, 'STARTING');
     assert.equal(elements.get('camera-idle-title').textContent, 'Waiting for camera');
@@ -287,21 +288,19 @@ test('camera preview mirrors the image used by gesture direction mapping', async
 });
 
 test('setup provides an accessible camera selector', async () => {
-  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const html = await readFile(new URL('../workspace.html', import.meta.url), 'utf8');
   assert.match(html, /<label[^>]*for="camera-selection"/);
   assert.match(html, /<select id="camera-selection"/);
 });
 
 test('preview copy explains live camera and local hand-skeleton behavior', async () => {
-  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /Preview stays visible during setup and live sessions\./);
-  assert.match(html, /During a live session, use Hide preview to hide it\./);
-  assert.match(html, /A local hand skeleton shows tracking/);
+  const html = await readFile(new URL('../workspace.html', import.meta.url), 'utf8');
+  assert.match(html, /Preview stays on this device\. No video is saved or uploaded\./);
   assert.match(html, /id="hand-overlay" class="hand-overlay" aria-hidden="true" hidden/);
 });
 
 test('camera preview exposes live, non-announcing gesture diagnostics', async () => {
-  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const html = await readFile(new URL('../workspace.html', import.meta.url), 'utf8');
   const css = await readFile(new URL('../styles.css', import.meta.url), 'utf8');
   for (const id of [
     'camera-diagnostics', 'diagnostic-tracking', 'diagnostic-position', 'diagnostic-gesture',
@@ -324,31 +323,29 @@ test('entering a valid live session keeps the preview visible by default', async
 });
 
 test('live camera preview has a state-neutral accessible name', async () => {
-  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const html = await readFile(new URL('../workspace.html', import.meta.url), 'utf8');
   assert.match(html, /id="camera-preview"[^>]*aria-label="Live camera preview"/);
   assert.doesNotMatch(html, /Live camera preview, currently off/);
 });
 
 test('preview toggle starts hidden and disabled until a live camera is active', async () => {
-  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const html = await readFile(new URL('../workspace.html', import.meta.url), 'utf8');
   assert.match(html, /id="preview-toggle"[^>]*aria-pressed="false" hidden disabled/);
 });
 
-test('presenter pairing stays camera independent and follows authenticated host lifecycle', async () => {
-  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+test('presenter pairing lists phones and disconnects one without affecting the session', async () => {
+  const html = await readFile(new URL('../workspace.html', import.meta.url), 'utf8');
   const appSource = await readFile(new URL('../app.js', import.meta.url), 'utf8');
-  const deckActionsStart = html.indexOf('<div class="deck-heading-actions">');
-  const deckActionsEnd = html.indexOf('</div>', deckActionsStart);
-  assert.ok(html.slice(deckActionsStart, deckActionsEnd).includes('id="connect-phone"'));
+  assert.match(html, /<button id="connect-phone"[^>]*>/);
   const sourceUi = appSource.slice(appSource.indexOf('function renderSourceUi()'), appSource.indexOf('async function renderPdfPage'));
   assert.match(sourceUi, /show\(elements\.connectPhone, true\)/);
   assert.match(sourceUi, /pdfActive \? 'PDF · Local file' : 'Browser · Sample deck'/);
-  assert.match(html, /<button id="connect-phone"[^>]*>Connect phone<\/button>/);
+  assert.match(html, /<strong>Connect phone<\/strong>/);
   assert.doesNotMatch(html.match(/<button id="connect-phone"[^>]*>/)?.[0] ?? '', /hidden/);
   assert.match(html, /<dialog id="pairing-dialog"[^>]*aria-labelledby="pairing-title"/);
   assert.match(html, /<label[^>]*for="pairing-interface"[^>]*>Private network interface/);
   assert.match(html, /<label[^>]*for="pairing-url"[^>]*>Pairing URL/);
-  for (const label of ['Start phone connection', 'Copy pairing URL', 'New pairing link', 'Disconnect phone', 'Close']) {
+  for (const label of ['Start phone connection', 'Copy pairing URL', 'Renew pairing link', 'Disconnect all', 'Close']) {
     assert.match(html, new RegExp(`>${label.replace(/[.*+?^${}()|[\\]\\]/g, '\\\\$&')}<`));
   }
 
@@ -356,6 +353,7 @@ test('presenter pairing stays camera independent and follows authenticated host 
     'connect-phone', 'pairing-dialog', 'pairing-interface', 'start-phone-remote',
     'pairing-qr-panel', 'pairing-qr', 'pairing-url-panel', 'pairing-url',
     'copy-pairing-url', 'pairing-status', 'new-pairing-link', 'disconnect-phone',
+    'paired-phones-panel', 'paired-phones', 'paired-phones-empty', 'paired-phone-count',
     'close-pairing-dialog', 'camera-preview', 'slide-number', 'slide-count', 'deck-progress',
     'deck-visual', 'target-status', 'sample-canvas-topline', 'sample-canvas-content', 'sample-canvas-footer',
   ];
@@ -451,7 +449,7 @@ test('presenter pairing stays camera independent and follows authenticated host 
   }
   setGlobal('WebSocket', RemoteSocket);
   try {
-    const app = await import(`../app.js?pairing-test=${Date.now()}`);
+    await import(`../app.js?pairing-test=${Date.now()}`);
     const connectButton = elements.get('connect-phone');
     assert.equal(connectButton.hidden, false, 'Connect phone is visible with the sample deck');
     connectButton.focus();
@@ -482,6 +480,18 @@ test('presenter pairing stays camera independent and follows authenticated host 
     assert.equal(elements.get('pairing-qr').src, 'data:image/png;base64,qr-1');
     assert.equal(elements.get('pairing-url-panel').hidden, false);
     assert.equal(elements.get('pairing-url').value, 'http://192.168.1.20:43123/remote#invite-1');
+    socket.message({ type: 'phones', phones: [
+      { phoneId: 'phone-1', label: 'Alex iPhone', deviceType: 'iphone', status: 'connected' },
+      { phoneId: 'phone-2', label: 'Phone 2', deviceType: 'phone', status: 'reconnecting' },
+    ] });
+    const phoneRows = elements.get('paired-phones').children;
+    assert.equal(phoneRows.length, 2);
+    assert.equal(elements.get('paired-phone-count').textContent, '2 / 8');
+    assert.equal(phoneRows[0].children[0].children[0].textContent, 'Alex iPhone');
+    assert.equal(phoneRows[0].children[1].textContent, 'Connected');
+    assert.equal(phoneRows[1].children[1].textContent, 'Reconnecting');
+    await phoneRows[0].children[2].dispatch('click');
+    assert.deepEqual(socket.sent.at(-1), { type: 'removePhone', phoneId: 'phone-1' });
     socket.message({ type: 'inviteExpired' });
     assert.equal(elements.get('new-pairing-link').hidden, false);
     assert.equal(elements.get('pairing-qr-panel').hidden, true);

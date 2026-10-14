@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { once } from 'node:events';
 import { createAppServer, resolveListenHost } from '../server.mjs';
 
-const scratch = process.env.TMPDIR ?? '/home/dei/.hermes/cache/scratch';
+const scratch = process.env.TMPDIR ?? tmpdir();
 
 test('development server accepts loopback or all-interface bind addresses', () => {
   assert.equal(resolveListenHost(undefined), '0.0.0.0');
@@ -20,7 +21,7 @@ test('served app shell loads the client controller module', async () => {
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
     const origin = `http://127.0.0.1:${server.address().port}`;
-    const page = await fetch(`${origin}/`);
+    const page = await fetch(`${origin}/workspace.html`);
     assert.equal(page.status, 200);
     const html = await page.text();
     assert.ok(html.includes('<script type="module" src="app.js"></script>'));

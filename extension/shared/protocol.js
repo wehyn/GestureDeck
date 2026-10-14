@@ -25,7 +25,7 @@ export function isLoopbackControllerUrl(value) {
     return url.protocol === 'http:'
       && ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(url.hostname)
       && url.port === String(DEFAULT_CONTROLLER_PORT)
-      && url.pathname === '/';
+      && ['/', '/workspace.html'].includes(url.pathname);
   } catch {
     return false;
   }
@@ -38,6 +38,7 @@ export function isControllerRequest(value) {
     || typeof value.id !== 'string'
     || value.id.length < 1
     || value.id.length > 128
+    // eslint-disable-next-line no-control-regex -- reject control characters in controller IDs.
     || /[\s\u0000-\u001f\u007f]/.test(value.id)) return false;
   const keys = Object.keys(value).sort().join(',');
   if (value.command === 'status') return keys === 'command,id,source,type';
