@@ -211,6 +211,9 @@ test('pairs a Canva target without inventing slide position', () => {
   assert.deepEqual(phoneSocket.messages[0], {
     type: 'paired',
     credential: 'phone-credential',
+    phoneId: 'phone-id-one',
+    label: 'Phone 1',
+    deviceType: 'phone',
     state: { target: 'canva', ready: true, index: null, total: null, busy: false },
   });
   harness.session.handlePhoneMessage(phoneSocket, {
