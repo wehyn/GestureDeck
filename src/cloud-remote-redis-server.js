@@ -1073,13 +1073,15 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
             await publish(redis, presenterEvents, channelKey(id, 'presenter'), command);
           }
         } else if (message.type === 'disconnect') {
-          pendingDisconnect = (async () => {
-            const removed = await redis.eval(REMOVE_PHONE_SCRIPT,
-              [sessionKey, key(id, 'phone-lease'), key(id, 'presenter-lease')],
-              [phoneId, credential, key(id, 'phone-lease:'), String(Date.now()), connectionId, '',
-                String(SESSION_TTL_SECONDS)]);
-            if (removed === 'removed') await publishPhoneList(id);
-          })();
+          if (!pendingDisconnect) {
+            pendingDisconnect = (async () => {
+              const removed = await redis.eval(REMOVE_PHONE_SCRIPT,
+                [sessionKey, key(id, 'phone-lease'), key(id, 'presenter-lease')],
+                [phoneId, credential, key(id, 'phone-lease:'), String(Date.now()), connectionId, '',
+                  String(SESSION_TTL_SECONDS)]);
+              if (removed === 'removed') await publishPhoneList(id);
+            })();
+          }
           try {
             await pendingDisconnect;
           } finally {
