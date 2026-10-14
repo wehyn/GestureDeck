@@ -66,11 +66,11 @@ class MemoryRedis {
 
     if (operation === 'RENEW_INVITE') {
       const session = this.values.get(keys[0]);
-      const now = Number(args[2]);
+      const now = Date.now();
       if (!session?.active || Number(session.expiresAt ?? 0) <= now
         || session.hostCredential !== args[0] || session.origin !== args[1]) return 'unavailable';
-      session.invite = args[3];
-      session.inviteExpiresAt = Number(args[4]);
+      session.invite = args[2];
+      session.inviteExpiresAt = now + Number(args[3]);
       session.pairAttempts = 0;
       session.inviteExpiredNotified = false;
       this.values.set(keys[0], session);

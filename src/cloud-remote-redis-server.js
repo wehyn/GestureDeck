@@ -39,15 +39,16 @@ const RENEW_INVITE_SCRIPT = `
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 'unavailable' end
 local session = cjson.decode(raw)
-local now = tonumber(ARGV[3])
-if not session.active or tonumber(session.expiresAt or 0) <= now then return 'unavailable' end
+local redisTime = redis.call('TIME')
+local now = tonumber(redisTime[1]) * 1000 + math.floor(tonumber(redisTime[2]) / 1000)
+local expiresAt = tonumber(session.expiresAt or 0)
+if not session.active or expiresAt <= now then return 'unavailable' end
 if session.hostCredential ~= ARGV[1] or session.origin ~= ARGV[2] then return 'unavailable' end
-session.invite = ARGV[4]
-session.inviteExpiresAt = tonumber(ARGV[5])
+session.invite = ARGV[3]
+session.inviteExpiresAt = now + tonumber(ARGV[4])
 session.pairAttempts = 0
 session.inviteExpiredNotified = false
-local ttl = math.max(1, math.ceil((session.expiresAt - now) / 1000))
-redis.call('SET', KEYS[1], cjson.encode(session), 'EX', ttl)
+redis.call('SET', KEYS[1], cjson.encode(session), 'PXAT', string.format('%.0f', expiresAt))
 return cjson.encode({origin = session.origin, invite = session.invite,
   inviteExpiresAt = session.inviteExpiresAt})
 `;
@@ -1149,15 +1150,12 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
         sendJson(response, 200, { stopped: true });
         return;
       }
-      const now = Date.now();
       const invite = token();
-      const inviteExpiresAt = now + INVITE_TTL_MS;
       const renewed = objectFromScriptResult(await redis.eval(RENEW_INVITE_SCRIPT, [sessionKey], [
         body.hostCredential,
         new URL(request.headers.origin).origin,
-        String(now),
         invite,
-        String(inviteExpiresAt),
+        String(INVITE_TTL_MS),
       ]));
       if (!renewed || typeof renewed.origin !== 'string' || renewed.invite !== invite
         || !Number.isFinite(renewed.inviteExpiresAt)) {
