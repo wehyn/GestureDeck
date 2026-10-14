@@ -191,6 +191,67 @@ test('valid invite pairs, stores its credential and label, and removes the fragm
   assert.equal(result.document.getElementById('previous-button').disabled, false);
 });
 
+test('hosted remote uses its legacy pairing protocol and accepts its response', () => {
+  const sessionId = '0123456789abcdef';
+  const result = setup({
+    locationExtras: {
+      protocol: 'https:', host: 'gesturedeck.example', pathname: `/r/${sessionId}`,
+      href: `https://gesturedeck.example/r/${sessionId}#invite-1`,
+    },
+  });
+  result.document.getElementById('connect-button').dispatch('click');
+
+  assert.equal(result.socket.url, `wss://gesturedeck.example/api/cloud-remote-ws?__gd_route=phone&session=${sessionId}`);
+  assert.equal(result.document.getElementById('device-nickname-field').hidden, true);
+  result.socket.open();
+  assert.deepEqual(result.socket.sent, [{ type: 'pair', invite: 'invite-1' }]);
+  result.socket.message({
+    type: 'paired', credential: 'cloud-phone-secret',
+    state: { index: 2, total: 18, busy: false },
+  });
+
+  assert.equal(result.sessionStorage.values.get(`phoneSessionCredential:${sessionId}`), 'cloud-phone-secret');
+  assert.equal(result.document.getElementById('slide-position').textContent, '3 / 18');
+  assert.match(result.document.getElementById('connection-status').textContent, /connected/i);
+  assert.deepEqual(result.history.calls, [[null, '', `/r/${sessionId}`]]);
+});
+
+test('hosted remote resumes with the legacy cloud response shape', () => {
+  const sessionId = 'fedcba9876543210';
+  const result = setup({
+    hash: '',
+    storageImpl: storage({ [`phoneSessionCredential:${sessionId}`]: 'cloud-phone-secret' }),
+    locationExtras: {
+      protocol: 'https:', host: 'gesturedeck.example', pathname: `/r/${sessionId}`,
+      href: `https://gesturedeck.example/r/${sessionId}`,
+    },
+  });
+
+  assert.deepEqual(result.socket.sent, []);
+  result.socket.open();
+  assert.deepEqual(result.socket.sent, [{ type: 'resume', credential: 'cloud-phone-secret' }]);
+  result.socket.message({ type: 'resumed', state: { index: 7, total: 18, busy: false } });
+
+  assert.equal(result.document.getElementById('slide-position').textContent, '8 / 18');
+  assert.match(result.document.getElementById('connection-status').textContent, /connected/i);
+});
+
+test('hosted single-phone limit explains an already-paired rejection', () => {
+  const sessionId = '0011223344556677';
+  const result = setup({
+    locationExtras: {
+      protocol: 'https:', host: 'gesturedeck.example', pathname: `/r/${sessionId}`,
+      href: `https://gesturedeck.example/r/${sessionId}#invite-1`,
+    },
+  });
+  result.document.getElementById('connect-button').dispatch('click');
+  result.socket.open();
+  result.socket.message({ type: 'pairRejected', reason: 'already-paired' });
+
+  assert.match(result.document.getElementById('connection-status').textContent, /already has a phone connected/i);
+  assert.equal(result.document.getElementById('connection-status').dataset.reason, 'already-paired');
+});
+
 test('credential storage failure disconnects the paired phone and clears storage', () => {
   const result = setup();
   result.document.getElementById('connect-button').dispatch('click');

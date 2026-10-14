@@ -41,6 +41,7 @@ function detectDeviceType(userAgent) {
 const PAIR_ERRORS = {
   expired: 'This pairing link has expired. Ask the presenter for a fresh link.',
   invalid: 'This pairing link is invalid. Scan a fresh QR code or open the latest link.',
+  'already-paired': 'This hosted presentation already has a phone connected. Disconnect it before pairing another phone.',
   'session-full': 'This presentation already has eight phones. Try again after someone disconnects a phone.',
   'host-unavailable': 'GestureDeck is not ready to pair. Ask the presenter to reconnect the remote.',
 };
@@ -79,12 +80,17 @@ export function mountMobileRemotePhone({
   const goButton = document.getElementById('go-button');
   const disconnectButton = document.getElementById('disconnect-button');
   const pairingPanel = document.getElementById('pairing-panel');
+  const nicknameField = document.getElementById('device-nickname-field');
   const nicknameInput = document.getElementById('device-nickname');
   const connectButton = document.getElementById('connect-button');
   const connectedAsElement = document.getElementById('connected-as');
   const actionStatus = document.getElementById('action-status');
-  const elements = [statusElement, positionElement, previousButton, nextButton, slideNumber, goButton, disconnectButton, actionStatus, pairingPanel, nicknameInput, connectButton, connectedAsElement];
+  const elements = [statusElement, positionElement, previousButton, nextButton, slideNumber, goButton, disconnectButton, actionStatus, pairingPanel, nicknameField, nicknameInput, connectButton, connectedAsElement];
   if (elements.some((element) => !element)) throw new TypeError('Phone remote page is missing required controls');
+
+  // Hosted V1 has a legacy single-phone relay with no nickname or device-list
+  // fields. Keep its pairing screen honest; the local remote supports names.
+  if (cloudSessionId) nicknameField.hidden = true;
 
   const timerHost = document.defaultView ?? globalThis;
   const schedule = typeof timerHost.setTimeout === 'function'
@@ -301,9 +307,13 @@ export function mountMobileRemotePhone({
     try { message = JSON.parse(event.data); } catch { return; }
     if (!isRecord(message)) return;
 
+    const hasPhoneIdentity = validPhoneIdentity(message);
+    const legacyCloudPair = cloudSessionId
+      && Object.keys(message).sort().join(',') === 'credential,state,type'
+      && typeof message.credential === 'string' && message.credential.length > 0;
     if (message.type === 'paired'
       && typeof message.credential === 'string' && message.credential.length > 0
-      && validPhoneIdentity(message)
+      && (hasPhoneIdentity || legacyCloudPair)
       && updateState(message.state)) {
       credential = message.credential;
       try {
@@ -317,7 +327,7 @@ export function mountMobileRemotePhone({
         target.close();
         return;
       }
-      setConnectedAs(message.label);
+      if (hasPhoneIdentity) setConnectedAs(message.label);
       pairingInProgress = false;
       pairAfterOpen = false;
       pairRejected = false;
@@ -332,8 +342,12 @@ export function mountMobileRemotePhone({
       return;
     }
 
-    if (message.type === 'resumed' && credential && validPhoneIdentity(message) && updateState(message.state)) {
-      setConnectedAs(message.label);
+    const legacyCloudResume = cloudSessionId
+      && Object.keys(message).sort().join(',') === 'state,type';
+    if (message.type === 'resumed' && credential
+      && (hasPhoneIdentity || legacyCloudResume)
+      && updateState(message.state)) {
+      if (hasPhoneIdentity) setConnectedAs(message.label);
       ready = true;
       retryAttempt = 0;
       setStatus('Connected to presenter', 'connected');
@@ -414,12 +428,12 @@ export function mountMobileRemotePhone({
       if (credential) send({ type: 'resume', credential }, nextSocket);
       else if (invite && pairAfterOpen) {
         pairAfterOpen = false;
-        send({
-          type: 'pair',
-          invite,
-          nickname: pendingNickname,
-          deviceType: detectDeviceType(navigatorImpl?.userAgent),
-        }, nextSocket);
+        const message = { type: 'pair', invite };
+        if (!cloudSessionId) {
+          message.nickname = pendingNickname;
+          message.deviceType = detectDeviceType(navigatorImpl?.userAgent);
+        }
+        send(message, nextSocket);
       }
       else {
         terminal = true;
