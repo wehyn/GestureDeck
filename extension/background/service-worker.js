@@ -2,7 +2,7 @@ import {
   isCanvaPresentationUrl,
   isCanvaUrl,
   isControllerRequest,
-  isLoopbackControllerUrl,
+  isGestureDeckControllerUrl,
   presentationKeyForAction,
 } from '../shared/protocol.js';
 
@@ -123,7 +123,7 @@ export function createCanvaExtensionWorker(chromeApi) {
   }
 
   async function handleControllerRequest(port, message) {
-    if (!isLoopbackControllerUrl(port.sender?.url) || !isControllerRequest(message)) return;
+    if (!isGestureDeckControllerUrl(port.sender?.url) || !isControllerRequest(message)) return;
     if (message.command === 'status') {
       post(port, {
         source: 'gesturedeck-extension', type: 'canva-controller-response',
@@ -153,7 +153,7 @@ export function createCanvaExtensionWorker(chromeApi) {
   }
 
   chromeApi.runtime.onConnect.addListener((port) => {
-    if (port.name !== 'controller' || !isLoopbackControllerUrl(port.sender?.url)) {
+    if (port.name !== 'controller' || !isGestureDeckControllerUrl(port.sender?.url)) {
       port.disconnect();
       return;
     }

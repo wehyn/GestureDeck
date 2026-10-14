@@ -1,5 +1,6 @@
 const NAVIGATION_ACTIONS = new Set(['previous', 'next']);
 export const DEFAULT_CONTROLLER_PORT = 5173;
+export const PRODUCTION_CONTROLLER_ORIGIN = 'https://gesturedeck-two.vercel.app';
 
 export function isCanvaUrl(value) {
   try {
@@ -26,6 +27,16 @@ export function isLoopbackControllerUrl(value) {
       && ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(url.hostname)
       && url.port === String(DEFAULT_CONTROLLER_PORT)
       && ['/', '/workspace.html'].includes(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+export function isGestureDeckControllerUrl(value) {
+  try {
+    const url = new URL(value);
+    if (url.username || url.password || !['/', '/workspace.html'].includes(url.pathname)) return false;
+    return isLoopbackControllerUrl(value) || url.origin === PRODUCTION_CONTROLLER_ORIGIN;
   } catch {
     return false;
   }

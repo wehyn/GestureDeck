@@ -1,5 +1,6 @@
-if ((location.hostname === '127.0.0.1' || location.hostname === 'localhost')
-  && ['/', '/workspace.html'].includes(location.pathname)) {
+import { isGestureDeckControllerUrl } from '../shared/protocol.js';
+
+if (isGestureDeckControllerUrl(location.href)) {
   const origin = location.origin;
   let port;
 
