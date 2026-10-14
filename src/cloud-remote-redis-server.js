@@ -130,7 +130,10 @@ local found = false
 for _, phone in pairs(phones) do
   if phone.credential == ARGV[1] then found = true; break end
 end
-if not found and session.phoneCredential ~= ARGV[1] then return 'invalid' end
+local legacy = not found and session.phoneCredential == ARGV[1]
+if not found and not legacy then return 'invalid' end
+local leaseKey = legacy and KEYS[6] or KEYS[5]
+if redis.call('GET', leaseKey) ~= ARGV[7] then return 'invalid' end
 if ARGV[2] == 'goTo' and tonumber(ARGV[3]) >= session.state.total then return 'out-of-range' end
 if redis.call('SET', KEYS[2], 'pending', 'NX', 'EX', ARGV[4]) == false then return 'duplicate' end
 if ARGV[6] == '1' then
@@ -148,18 +151,26 @@ if not raw then return 'missing' end
 local session = cjson.decode(raw)
 local phones = session.phones or {}
 local phone = phones[ARGV[1]]
+local legacy = false
 if not phone and session.phoneCredential and session.phoneCredential ~= cjson.null then
   local oldId = session.phoneId or session.phoneCredential
   if ARGV[1] == oldId then
     phone = {credential = session.phoneCredential, phoneId = oldId}
-    redis.call('DEL', KEYS[2])
-    session.phoneCredential = nil
-    session.phoneId = nil
-    session.phoneLabel = nil
-    session.phoneDeviceType = nil
+    legacy = true
   end
 end
 if not phone or (ARGV[2] ~= '' and phone.credential ~= ARGV[2]) then return 'missing' end
+if ARGV[5] ~= '' then
+  local leaseKey = legacy and KEYS[2] or ARGV[3] .. phone.credential
+  if redis.call('GET', leaseKey) ~= ARGV[5] then return 'missing' end
+end
+if legacy then
+  redis.call('DEL', KEYS[2])
+  session.phoneCredential = nil
+  session.phoneId = nil
+  session.phoneLabel = nil
+  session.phoneDeviceType = nil
+end
 phones[ARGV[1]] = nil
 session.phones = phones
 local ttl = math.max(1, math.ceil((session.expiresAt - tonumber(ARGV[4])) / 1000))
@@ -737,7 +748,7 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
           && typeof message.phoneId === 'string' && PHONE_ID_PATTERN.test(message.phoneId)) {
           const removed = await redis.eval(REMOVE_PHONE_SCRIPT,
             [sessionKey, key(id, 'phone-lease')],
-            [message.phoneId, '', key(id, 'phone-lease:'), String(Date.now())]);
+            [message.phoneId, '', key(id, 'phone-lease:'), String(Date.now()), '']);
           if (removed === 'removed') {
             await broadcastToPhones(id, { type: 'sessionEnded', phoneId: message.phoneId });
             await publishPhoneList(id);
@@ -902,14 +913,18 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
             : { type: 'command', id: presenterCommandId, action: message.action };
           const dedupeKey = key(id, `command:${phoneId}:${message.id}`);
           const localPresenter = localSessions.get(id)?.presenter;
-          const result = await redis.eval(PHONE_COMMAND_SCRIPT, [sessionKey, dedupeKey, presenterEvents, channelKey(id, 'presenter')], [
-            credential,
-            message.action,
-            String(message.index ?? ''),
-            String(SESSION_TTL_SECONDS),
-            JSON.stringify(command),
-            localPresenter ? '0' : '1',
-          ]);
+          const result = await redis.eval(
+            PHONE_COMMAND_SCRIPT,
+            [sessionKey, dedupeKey, presenterEvents, channelKey(id, 'presenter'), leaseKey, key(id, 'phone-lease')],
+            [
+              credential,
+              message.action,
+              String(message.index ?? ''),
+              String(SESSION_TTL_SECONDS),
+              JSON.stringify(command),
+              localPresenter ? '0' : '1',
+              connectionId,
+            ]);
           if (result !== 'ok') {
             socket.send({ type: 'commandAck', id: message.id, accepted: false });
             return;
@@ -920,7 +935,7 @@ export function attachRedisCloudRemote(server, { redis = makeRedis(), webSocketF
         } else if (message.type === 'disconnect') {
           const removed = await redis.eval(REMOVE_PHONE_SCRIPT,
             [sessionKey, key(id, 'phone-lease')],
-            [phoneId, credential, key(id, 'phone-lease:'), String(Date.now())]);
+            [phoneId, credential, key(id, 'phone-lease:'), String(Date.now()), connectionId]);
           if (removed === 'removed') await publishPhoneList(id);
           socket.close(1000, 'Phone disconnected');
         }
