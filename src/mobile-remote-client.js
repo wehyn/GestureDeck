@@ -65,7 +65,7 @@ function validPhoneList(message) {
  * Connect a presenter to its local or cloud server. onConnection receives
  * { type: 'authenticated' | 'rejected' | 'closed' | 'phonePaired' |
  *   'phones' | 'inviteExpired' | 'sessionEnded', reason?: string }.
- * Only rejection includes a reason. No reconnect is attempted.
+ * A rejection may omit its reason. No reconnect is attempted.
  */
 export function createMobileRemoteClient({
   WebSocketImpl = globalThis.WebSocket,
@@ -125,10 +125,11 @@ export function createMobileRemoteClient({
       return;
     }
     if (message.type === 'presenterRejected'
-      && Object.keys(message).sort().join(',') === 'reason,type'
-      && typeof message.reason === 'string') {
+      && Object.keys(message).every((key) => key === 'type' || key === 'reason')) {
       rejected = true;
-      onConnection({ type: 'rejected', reason: message.reason });
+      const rejection = { type: 'rejected' };
+      if (typeof message.reason === 'string') rejection.reason = message.reason;
+      onConnection(rejection);
       return;
     }
     if (!authenticated) return;
