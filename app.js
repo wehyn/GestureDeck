@@ -908,7 +908,12 @@ function handleMobileRemoteConnection(event, generation) {
   }
   if (event.type === 'rejected') {
     clearPairingMaterial();
-    setPairingStatus('The presenter connection was rejected. Disconnect and try again.');
+    const rejectionMessages = {
+      'already-connected': 'Another presenter connection already owns this session (`already-connected`). Disconnect all, then create a new session.',
+      'invalid-credential': 'The cloud relay could not verify this presenter session (`invalid-credential`). The phone has not connected yet.',
+    };
+    setPairingStatus(rejectionMessages[event.reason]
+      ?? 'The presenter connection was rejected. Disconnect and try again.');
     return;
   }
   if (event.type === 'closed' || event.type === 'sessionEnded') {
