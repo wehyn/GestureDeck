@@ -1,139 +1,99 @@
 # GestureDeck
 
-GestureDeck lets you present its sample deck or a PDF from your browser. Use the local version for hands-free camera gestures, or use a phone as a slide remote. PDF pages are rendered in the presenter’s browser; the cloud remote relays pairing, target readiness, and slide controls only. Camera frames, PDF files, slide content, and Canva credentials stay in the presenter’s browser.
+GestureDeck is a local-first browser presentation controller. Present the built-in sample deck or a PDF with optional hand gestures or a phone remote. A Chrome extension can connect a phone to a selected live Canva presentation.
 
-## Submission links
+## Quick start
 
-| Submission item | Link |
-| --- | --- |
-| Public GitHub repository | [github.com/wehyn/GestureDeck](https://github.com/wehyn/GestureDeck) |
-| Demo video | [Watch on YouTube](https://youtu.be/KlBZ4BAcMwo?si=nWaqGRmpesDprLg5) |
-| LinkedIn video post | [View the post](https://lnkd.in/p/gQFs2FYi) |
-
-## Team
-
-**Team name:** Cantos Family
-
-- Vienn Yzabel C. Babasa
-- Harley Albert C. Buendia
-- Giann Ed Louise C. Garcia
-- Wayne Andrei C. Garcia
-
-## Why run the AI locally?
-
-Hand tracking needs a continuous camera feed and timely feedback during a presentation. Running the hand-landmark model on the presenter's device keeps video frames and hand landmarks off third-party servers, avoids a network round trip for each gesture, and lets the presentation work without internet access after setup. The browser asks for camera access only when the presenter starts setup; stopping the session releases the camera.
-
-## What runs locally
-
-- A Node.js development server bound to `0.0.0.0` (all network interfaces).
-- Camera capture, after you explicitly start setup or a session.
-- MediaPipe hand-landmark inference and swipe recognition in the browser, using the model and WebAssembly runtime served from local project files.
-- The sample slide deck, imported PDF rendering, hand-skeleton preview, and gesture settings. Settings are saved in this browser on this device; imported PDFs are kept only in memory for the current page session.
-- The PDF file and rendered pages stay in the presenter’s browser, including when using the cloud phone remote.
-
-Camera frames and hand landmarks are not uploaded or saved. The camera is off until you choose to start it, and stopping the session releases the camera.
-
-## What requires an internet connection
-
-- Cloning or pushing this repository to GitHub.
-- The initial `npm install` when the required package is not already available in the local npm cache.
-- Publishing or viewing the demo video and LinkedIn post.
-- Opening and presenting a Canva design requires Canva's normal internet connection.
-
-After dependencies are installed, the sample deck, PDF import, and hand tracking can run offline. The hand model is included in this repository, and the MediaPipe and PDF.js runtimes are served locally; the app does not call a cloud inference API. A hosted GestureDeck instance is needed when you want a phone on a different network to control the presenter browser.
-
-## Models used
-
-- **Model:** MediaPipe Hand Landmarker, float16 task model at `assets/hand_landmarker.task` (about 7.8 MB; bundled with the project).
-- **Runtime:** `@mediapipe/tasks-vision` 0.10.33, with its WebAssembly files loaded from the local `node_modules` directory.
-- The model estimates hand landmarks. GestureDeck's JavaScript swipe recognizer interprets horizontal hand movement as slide navigation; there is no separate swipe-classification model or pose-specific command model.
-
-Model source: [MediaPipe Hand Landmarker float16 model](https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task). See the [official web guide](https://developers.google.com/edge/mediapipe/solutions/vision/hand_landmarker/web_js).
-
-## Technologies and frameworks
-
-- HTML, CSS, and vanilla JavaScript ES modules for the interface and client logic (no frontend framework).
-- Node.js 20+ and its built-in HTTP server for local-network serving.
-- MediaPipe Tasks Vision 0.10.33 and WebAssembly for local hand tracking.
-- PDF.js (`pdfjs-dist` 4.10.38) for local PDF page rendering.
-- Browser APIs including `getUserMedia`, canvas, and `localStorage`.
-- Node.js built-in test runner for automated tests.
-
-## APIs and cloud services
-
-- **Runtime browser APIs:** `getUserMedia` for camera capture, Canvas for preview and PDF pages, the Fullscreen API for presenting, and `localStorage` for gesture settings.
-- **Runtime cloud services and hosted AI APIs:** No hosted AI APIs are used. Hand inference, swipe recognition, and PDF rendering run on the device. When deployed over HTTPS, the app server can relay temporary phone pairing, target readiness, and slide navigation messages for a selected Canva tab; it does not receive PDF bytes, slide content, rendered pages, notes, Canva credentials, or camera data.
-- **Services used outside the running app:** GitHub hosts this public repository; npm may be needed to download dependencies during installation. YouTube hosts the demo video and LinkedIn hosts the video post; viewing them requires internet access.
-
-## Existing code and assets
-
-- The bundled `assets/hand_landmarker.task` is Google's [MediaPipe Hand Landmarker float16 model](https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task).
-- `@mediapipe/tasks-vision` 0.10.33 provides the third-party JavaScript and WebAssembly hand-tracking runtime. PDF.js (`pdfjs-dist` 4.10.38) provides PDF import and rendering in the browser. Their versions are pinned in `package.json` and `package-lock.json`.
-
-## AI development tools
-
-- **OpenAI Codex through Hermes Agent** was used for AI-assisted planning, implementation, and documentation.
-- In the running app, the MediaPipe Hand Landmarker is the only AI/ML inference component. Codex and Hermes are development tools; the app does not send camera data to them or to a hosted AI service.
-
-## Run locally
-
-Requires Node.js 20+ and npm.
+Use Node.js 20, which is the version used by CI, and npm.
 
 ```sh
-npm install
-npm test
-npm run check
-npm run lint
+npm ci
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173`.
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173) and choose **Start presenting**. The workspace opens with the sample deck. Choose **Open PDF** to present an unprotected PDF from this device, or choose **Start setup** to test both hand swipes before starting a gesture session. The left/right arrow keys work without the camera. For a PDF, choose **Present fullscreen** after importing it; browsers require a click to enter fullscreen.
 
-On the home page, click **Start presenting** to open the workspace. Then click **Open PDF** and choose an unprotected `.pdf` file. Each page becomes a slide. Click **Present fullscreen** to fill the browser display; browsers require this click before entering fullscreen. The Previous/Next/Exit controls appear when you move the pointer or focus them, then fade while idle. The left/right arrow keys and the same swipe gestures after starting a session also navigate pages. Press Escape or click **Exit fullscreen** to return to the workspace, or click **Back to sample deck** to return to the built-in example. Password-protected PDFs are not supported in this version. GestureDeck does not upload or store the PDF.
+Camera access starts only after **Start setup**. For local camera access, keep the presenter workspace on `localhost` or `127.0.0.1`; plain HTTP on a LAN address is not a secure browser context. The app serves its model, hand-tracking runtime, and PDF.js files locally.
 
-## Use the local phone remote
+## Phone-control options
 
-The phone remote controls GestureDeck's sample deck or imported PDF, and can control a connected live Canva presentation in Chrome.
+| Option | Presenter and phone requirements | Controls |
+| --- | --- | --- |
+| Local remote | Same trusted Wi-Fi or Tailscale network; Canva still needs internet | Sample deck, PDF, or a connected Canva tab (with extension) |
+| Canva remote | Chrome extension, Canva Present/View tab, and either the local or hosted GestureDeck workspace | Previous/Next in the selected Canva tab |
+| Hosted remote | HTTPS GestureDeck deployment with Redis configured; devices may use different networks | Sample deck, PDF, or Canva on a supported workspace origin |
 
-1. Start GestureDeck and open it on the presenter computer at `http://localhost:5173` (or `http://127.0.0.1:5173`), then click **Start presenting**. Plain HTTP on a LAN or Tailscale IP cannot access the camera.
-2. Connect both devices to the same trusted Wi-Fi network or Tailscale network.
-3. Choose **Connect phone**, select the private network interface used by the phone, and start the connection.
-4. Share the same QR code or fallback URL with up to eight phones. The invite stays valid for five minutes and can be renewed from the presenter dialog; renewing it keeps already paired phones connected.
-5. On first use, a phone can enter an optional name before tapping **Connect**. When no name is entered, GestureDeck makes a best-effort iPhone or Android phone label when the browser reveals a type; otherwise it uses **Phone**. Each phone shows **Connected as [label]**, matching its entry in the presenter list.
-6. Every connected phone has equal **Previous** and **Next** controls. The numbered picker is available for GestureDeck's sample deck and imported PDFs; Canva shows navigation only. If Wi-Fi briefly drops, the phone reconnects with the same label and current target state.
-7. The presenter can disconnect one phone from its list, or choose **Disconnect all** to end the remote session. **Disconnect** on a phone removes only that phone.
+### Use the local phone remote
 
-Names and coarse device types are used only for the active remote session. Each phone receives the target status and, when applicable, slide position and busy state; it does not receive other phones' names or presentation content.
+1. Open GestureDeck on the presenter computer at `http://localhost:5173` or `http://127.0.0.1:5173`, then choose **Start presenting**.
+2. Connect the presenter and phones to the same trusted Wi-Fi or Tailscale network.
+3. Choose **Connect phone**, select the private network interface used by the phones, and start pairing.
+4. Scan the QR code or share its fallback URL. Up to eight phones can join. The invite lasts five minutes; renewing it keeps already paired phones connected.
+5. Use **Previous** and **Next** on a phone. The numbered picker is available for the sample deck and PDFs. Canva exposes Previous/Next only.
 
-The main GestureDeck server binds to `0.0.0.0`; open it over loopback on the presenter computer for camera access. The QR code or fallback URL uses the selected Wi-Fi or Tailscale address for the phone. The presenter controls stay restricted to connections from that computer. Only while a remote session is active, a separate temporary listener binds to the selected Wi-Fi or Tailscale IPv4 interface and serves the phone controls. It closes when the presenter stops the remote or closes the page. Pair only on a trusted network: local HTTP and WebSocket control traffic is unencrypted outside the Tailscale tunnel.
+The presenter can remove one phone or disconnect everyone. Each phone can disconnect itself and reconnect after a brief Wi-Fi drop. The temporary phone listener closes when the presenter ends the session. Phones receive control state, not slide content, PDF files, filenames, or camera data. Local HTTP and WebSocket traffic is unencrypted outside a tunnel such as Tailscale, so pair only on a trusted network.
 
-The phone receives only the slide index and count when available, busy state, target status, and navigation commands. It does not download slide content, PDF bytes, filenames, rendered pages, or camera data. The local remote needs no internet connection, account, phone app, camera permission, PDF upload, slide transfer, or hosted QR service.
+### Use a phone with live Canva
 
-## Use your phone with live Canva
+1. In Chrome, open `chrome://extensions`, turn on **Developer mode**, choose **Load unpacked**, and select this repository's `extension/` folder. Reload the extension after updating it.
+2. Open a Canva design in **Present** or **View** mode. Open the GestureDeck extension and choose **Connect this presentation**.
+3. For local pairing, follow [Use the local phone remote](#use-the-local-phone-remote).
+4. For hosted pairing, choose **Show phone QR/link** in the extension popup. The extension opens the hosted workspace at `https://gesturedeck-two.vercel.app/workspace.html?experience=cloud&connect=phone`; scan its QR code or copy the link.
 
-Live Canva control uses the GestureDeck Chrome extension with either the local GestureDeck workspace or the hosted workspace at `https://gesturedeck-two.vercel.app/workspace.html?experience=cloud`. Hand-camera setup is not needed.
+The extension does not request camera access. It supports `localhost:5173`, `127.0.0.1:5173`, and the production host above; a self-hosted domain must be added to the extension's origin allowlists. Canva editing mode is refused. If the selected tab leaves Present or View mode, navigation is disabled. Canva does not report slide position or count, so phones show readiness and Previous/Next only. The hosted workspace must stay open during a hosted Canva session.
 
-1. In Chrome, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select this repository's `extension/` folder. If the extension is already loaded, click **Reload**.
-2. Open a Canva design in **Present** or **View** mode. Click the GestureDeck extension icon and choose **Connect this presentation**.
-3. For local phone pairing, start GestureDeck with `npm run dev`, open `http://localhost:5173` or `http://127.0.0.1:5173` on the presenter computer, and follow [Use the local phone remote](#use-the-local-phone-remote). Phones must be on the same trusted Wi-Fi or Tailscale network.
-4. For hosted phone pairing, click **Show phone QR/link** in the extension popup. GestureDeck opens the hosted workspace in a new tab and starts pairing. Scan its QR code or copy the link; up to eight phones can join from any network. Return to the Canva tab to present while keeping the hosted workspace open for pairing status.
+### Use the hosted phone remote
 
-The extension works with the local origins `http://localhost:5173` and `http://127.0.0.1:5173`, and with the hosted workspace URL above. Canva editing mode is refused. Canva has no reported slide number or count, so the phone shows readiness and **Previous**/**Next** controls only. The extension does not request camera access. If the selected tab leaves Present or View mode, phone navigation is disabled. For hosted sessions, the relay carries readiness and **Previous**/**Next** for the selected Canva tab; slide content and Canva credentials remain in the presenter’s browser.
+Open the hosted GestureDeck site over HTTPS, choose **Start presenting**, and pair phones with the QR code or link. The presenter can use a sample deck or import a PDF in that browser; for Canva, connect the selected tab with the extension first. Up to eight phones can join, including phones on another network.
 
-## Use the cloud phone remote
+The Vercel deployment uses Upstash Redis for temporary session and relay state. Configure `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` in the deployment environment; the legacy `KV_REST_API_URL` and `KV_REST_API_TOKEN` names are also supported. Without these values, hosted pairing reports that storage is unavailable; local presentation and camera gestures still work. Never put Redis credentials in source control or browser code.
 
-Open the hosted GestureDeck home page over HTTPS and choose **Start presenting**. The presenter can choose a sample deck or a PDF in that browser, then pair up to eight phones using the QR code or link. The phones can be on another network. The server relays pairing and slide controls; the PDF stays in the presenter's browser. For Canva, connect the selected Canva tab with the extension as described above. Cloud sessions relay that tab’s readiness and **Previous**/**Next** only; slide content and Canva credentials stay in the presenter's browser.
+## Privacy and data flow
 
-Cloud sessions and short-lived relay messages are stored in Redis for up to four hours so the presenter and phones can connect to separate server instances. The Redis store contains pairing credentials, target readiness, phone metadata, and temporary navigation state; it never contains the PDF, slide content, rendered pages, notes, Canva credentials, or camera data. The presenter can renew the invite while keeping paired phones connected, disconnect one phone, or end the session. There are no accounts or shared presenter roles. The reverse proxy must preserve same-origin requests and forward WebSocket upgrades. Use HTTPS so phone connections use secure WebSockets.
+- Camera capture is off until you choose **Start setup**. MediaPipe hand tracking and swipe recognition run in the presenter's browser. Camera frames and hand landmarks are not uploaded or saved.
+- Imported PDF bytes and rendered pages remain in the browser for the current page session. Gesture settings are saved in that browser's `localStorage`.
+- The local phone remote sends pairing credentials, phone labels, target readiness, slide position and busy state when available, and navigation commands. It does not send camera data or presentation media.
+- Hosted sessions use Redis for temporary pairing credentials, phone metadata, target readiness, slide position, busy state, and navigation commands. Sessions expire after up to four hours and invites after five minutes. The relay does not receive PDFs, slide content, rendered pages, notes, Canva credentials, or camera data.
 
-For Vercel, `npm run build:vercel` copies only browser assets to `dist/`; `vercel.json` sets that directory as the static output and routes cloud relay requests to the Node.js WebSocket function. Connect an Upstash Redis database to the Vercel project and make sure the deployment has `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` available. The legacy Vercel KV names `KV_REST_API_URL` and `KV_REST_API_TOKEN` are also supported. If these variables are missing, cloud pairing returns a storage-unavailable error; local presentation and camera gestures still work.
+Use the hosted relay when phones cannot reach the presenter over the same LAN or Tailscale network. The local sample deck, PDF presentation, and hand tracking work offline after dependencies are installed.
 
-To enable Redis in Vercel, open the project's **Storage** or **Marketplace** page, add **Upstash Redis**, connect it to the GestureDeck project, and redeploy Production after the integration adds its environment variables. The relay uses Redis streams to pass temporary commands between presenter and phone connections; keys expire automatically. Do not put Redis credentials in source control or browser code.
+## Development
 
-## Current prototype boundary
+```sh
+npm ci
+npm test
+npm run check
+npm run lint
+```
 
-GestureDeck controls its built-in sample deck or imported PDFs in the local page. The Chrome extension adds phone-based Previous/Next control for a selected live Canva presentation through either the local or hosted workspace. It does not control native Keynote, PowerPoint, or other presentation apps.
+The project uses Node.js's built-in test runner. GitHub Actions runs the test, syntax-check, and lint commands on Node.js 20. To prepare the Vercel static assets locally, run `npm run build:vercel`; it writes the deployable files to `dist/`.
 
-## Privacy and local model notes
+The development server defaults to `HOST=0.0.0.0` and `PORT=5173`. `HOST` also accepts `127.0.0.1`; set `PORT` to use another port. The local Canva extension bridge recognizes port `5173`.
 
-The runtime is pinned to `@mediapipe/tasks-vision` 0.10.33 because version 1.1.0 included an unsolicited Google telemetry request. `tests/local-hand-tracker.test.js` guards the bundled runtime against reintroducing that endpoint. Replacing the runtime or model should be followed by a fresh local-inference and privacy check.
+## Project layout
+
+- `app.js`, `index.html`, and `workspace.html`: browser UI and page orchestration.
+- `src/`: camera, gesture, PDF, local remote, and hosted remote modules.
+- `server.mjs`: local development server and local phone pairing routes.
+- `api/` and `vercel.json`: Vercel cloud-relay routes and deployment configuration.
+- `extension/`: Chrome Manifest V3 extension for live Canva control.
+- `tests/`: Node.js tests for modules, server routes, and extension behavior.
+- `assets/hand_landmarker.task`: bundled MediaPipe Hand Landmarker float16 model.
+
+## Technology and limits
+
+GestureDeck uses HTML, CSS, vanilla JavaScript ES modules, Node.js, MediaPipe Tasks Vision `0.10.33`, and PDF.js `4.10.38`. The bundled hand-landmark model is Google's float16 Hand Landmarker model, about 7.8 MB; see the [model source](https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task) and [official web guide](https://developers.google.com/edge/mediapipe/solutions/vision/hand_landmarker/web_js). Dependencies and model runtime are served from local project files; there is no hosted inference API.
+
+The MediaPipe runtime is pinned to `0.10.33` because version `1.1.0` added an unsolicited Google telemetry request. `tests/local-hand-tracker.test.js` guards the bundled runtime against reintroducing that endpoint; audit network behavior before changing the runtime.
+
+GestureDeck controls its sample deck and imported PDFs in the browser. The Chrome extension adds phone-based Previous/Next control for a selected Canva presentation. It does not control Keynote, PowerPoint, or other presentation apps. Password-protected PDFs are not supported.
+
+## Project links and team
+
+- [Public GitHub repository](https://github.com/wehyn/GestureDeck)
+- [Demo video](https://youtu.be/KlBZ4BAcMwo?si=nWaqGRmpesDprLg5)
+- [LinkedIn video post](https://lnkd.in/p/gQFs2FYi)
+
+**Team Cantos Family:** Vienn Yzabel C. Babasa, Harley Albert C. Buendia, Giann Ed Louise C. Garcia, and Wayne Andrei C. Garcia.
+
+OpenAI Codex through Hermes Agent was used for AI-assisted planning, implementation, and documentation. In the running app, MediaPipe Hand Landmarker is the only AI/ML inference component; camera data is not sent to development tools or hosted AI services.
