@@ -158,6 +158,7 @@ let pendingPairingInvite = null;
 let remoteActive = false;
 let remoteStarting = false;
 let remoteAuthenticated = false;
+let presenterConnectionRejected = false;
 let remoteGeneration = 0;
 // Keep stop requests distinct across replacements and coalesce duplicates for one session.
 let activeRemoteSessionKey = 0;
@@ -804,6 +805,7 @@ function resetPairingUi() {
   remoteActive = false;
   remoteStarting = false;
   remoteAuthenticated = false;
+  presenterConnectionRejected = false;
   phoneRemoteTarget = null;
   pairingInviteExpired = false;
   clearPairingMaterial();
@@ -908,16 +910,17 @@ function handleMobileRemoteConnection(event, generation) {
   }
   if (event.type === 'rejected') {
     clearPairingMaterial();
-    const rejectionMessages = {
-      'already-connected': 'Another presenter connection already owns this session (`already-connected`). Disconnect all, then create a new session.',
-      'invalid-credential': 'The cloud relay could not verify this presenter session (`invalid-credential`). The phone has not connected yet.',
-    };
-    setPairingStatus(rejectionMessages[event.reason]
-      ?? 'The presenter connection was rejected. Disconnect and try again.');
+    presenterConnectionRejected = true;
+    const rejectionMessage = event.reason === 'already-connected'
+      ? 'Another presenter connection already owns this session (`already-connected`). Disconnect all, then create a new session.'
+      : event.reason === 'invalid-credential'
+        ? 'The cloud relay could not verify this presenter session (`invalid-credential`). The phone has not connected yet.'
+        : 'The presenter connection was rejected. Disconnect and try again.';
+    setPairingStatus(rejectionMessage);
     return;
   }
   if (event.type === 'closed' || event.type === 'sessionEnded') {
-    if (!remoteActive) return;
+    if (!remoteActive || presenterConnectionRejected) return;
     void stopMobileRemote({ force: true, stopSession: !cloudExperience });
   }
 }
