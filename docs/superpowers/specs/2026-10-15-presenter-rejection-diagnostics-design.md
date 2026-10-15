@@ -6,9 +6,9 @@
 
 ## Goal
 
-Make a repeated hosted presenter-connection rejection diagnosable without changing the pairing protocol or the existing disconnect actions. The pairing dialog should explain which rejection category the cloud relay reported.
+Make a repeated presenter-connection rejection diagnosable without changing the pairing protocol or the existing disconnect actions. The pairing dialog should explain which rejection category the server reported.
 
-## Current behavior
+## Current behavior before this change
 
 - The hosted workspace starts a cloud phone session and opens a presenter WebSocket using the session ID and host credential returned by the cloud start API.
 - The cloud relay can reject presenter authentication because a presenter lease is already occupied or because the credential/session is invalid.
@@ -26,9 +26,10 @@ Make a repeated hosted presenter-connection rejection diagnosable without changi
 
 ### Pairing dialog status
 
-- When the presenter client reports `already-connected`, show: “Another presenter connection already owns this session (`already-connected`). Disconnect all, then create a new session.”
-- When it reports `invalid-credential`, show: “The cloud relay could not verify this presenter session (`invalid-credential`). The phone has not connected yet.”
-- For an absent or unrecognized reason, retain a generic presenter-rejection message and show no arbitrary server-provided text.
+- When the presenter client reports `already-connected`, show: “The presenter session was rejected as already in use (`already-connected`). Disconnect all, then create a new session.”
+- When it reports `invalid-credential`, show: “The presenter session could not be verified (`invalid-credential`). Disconnect all, then create a new session.”
+- For an absent or unrecognized reason, show: “The presenter connection was rejected. Disconnect all, then create a new session.”
+- Never show arbitrary server-provided text for an absent or unrecognized reason.
 - Keep the status in the existing `role="status"` live region.
 - Continue clearing QR/link material after rejection. Keep the existing **Disconnect all** action available to end the failed session.
 
@@ -36,7 +37,7 @@ Make a repeated hosted presenter-connection rejection diagnosable without changi
 
 - Do not change the extension’s **Disconnect Canva** behavior or the hosted **Disconnect all** behavior.
 - Do not change presenter authentication, session creation, leases, or automatic pairing behavior.
-- Do not retry automatically. The next step depends on the visible rejection category.
+- Do not retry automatically. Keep the failed session available for the explicit **Disconnect all** action.
 - Never display or log session IDs, host credentials, pairing invites, or raw server payloads.
 - Keep unknown reasons on the generic message to avoid rendering untrusted server text.
 
@@ -60,5 +61,5 @@ Make a repeated hosted presenter-connection rejection diagnosable without changi
 
 - The change uses the reason already carried by the existing event; it does not add an endpoint, secret, log field, or relay protocol message.
 - Known reasons and the fallback behavior are explicit.
-- The wording reports what the relay said without claiming which specific credential or deployment setting is wrong.
+- The wording identifies the reported rejection category without claiming that a cloud relay handled it or diagnosing a specific credential or deployment setting.
 - Scope is limited to the existing presenter rejection status path.

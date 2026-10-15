@@ -515,6 +515,41 @@ test('presenter pairing lists phones and disconnects one without affecting the s
     assert.equal(elements.get('disconnect-phone').hidden, true);
     assert.equal(cameraRequests, 0);
 
+    const rejectionCases = [
+      {
+        event: { type: 'presenterRejected', reason: 'invalid-credential' },
+        status: 'The presenter session could not be verified (`invalid-credential`). Disconnect all, then create a new session.',
+      },
+      {
+        event: { type: 'presenterRejected', reason: 'already-connected' },
+        status: 'The presenter session was rejected as already in use (`already-connected`). Disconnect all, then create a new session.',
+      },
+      {
+        event: { type: 'presenterRejected', reason: 'untrusted invite secret' },
+        status: 'The presenter connection was rejected. Disconnect all, then create a new session.',
+      },
+      {
+        event: { type: 'presenterRejected' },
+        status: 'The presenter connection was rejected. Disconnect all, then create a new session.',
+      },
+    ];
+    for (const { event, status } of rejectionCases) {
+      await elements.get('start-phone-remote').dispatch('click');
+      const rejectionSocket = RemoteSocket.instance;
+      rejectionSocket.open();
+      rejectionSocket.message(event);
+      assert.equal(elements.get('pairing-status').textContent, status);
+      assert.equal(elements.get('disconnect-phone').hidden, false);
+      assert.equal(elements.get('start-phone-remote').disabled, true);
+      const stopCount = calls.filter(({ url }) => url === '/api/mobile-remote/stop').length;
+      rejectionSocket.close();
+      assert.equal(elements.get('pairing-status').textContent, status);
+      assert.equal(calls.filter(({ url }) => url === '/api/mobile-remote/stop').length, stopCount);
+      await elements.get('disconnect-phone').dispatch('click');
+      assert.equal(elements.get('pairing-status').textContent, 'Disconnected');
+      assert.equal(calls.filter(({ url }) => url === '/api/mobile-remote/stop').length, stopCount + 1);
+    }
+
     await elements.get('close-pairing-dialog').dispatch('click');
     assert.equal(elements.get('pairing-dialog').open, false);
     assert.equal(fakeDocument.activeElement, connectButton);
@@ -549,8 +584,9 @@ test('presenter pairing lists phones and disconnects one without affecting the s
     assert.deepEqual(canvaSocket.sent.at(-1), { type: 'commandAck', id: 'canva-offline', accepted: false });
 
     const pagehideSocket = canvaSocket;
+    const stopsBeforePagehide = calls.filter(({ url }) => url === '/api/mobile-remote/stop').length;
     await windowListeners.get('pagehide')?.[0]?.();
-    assert.equal(calls.filter(({ url }) => url === '/api/mobile-remote/stop').length, 2);
+    assert.equal(calls.filter(({ url }) => url === '/api/mobile-remote/stop').length, stopsBeforePagehide + 1);
     assert.equal(pagehideSocket.readyState, 3);
     assert.equal(elements.get('pairing-url').value, '');
     assert.equal(elements.get('pairing-status').textContent, 'Disconnected');

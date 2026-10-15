@@ -912,10 +912,10 @@ function handleMobileRemoteConnection(event, generation) {
     clearPairingMaterial();
     presenterConnectionRejected = true;
     const rejectionMessage = event.reason === 'already-connected'
-      ? 'Another presenter connection already owns this session (`already-connected`). Disconnect all, then create a new session.'
+      ? 'The presenter session was rejected as already in use (`already-connected`). Disconnect all, then create a new session.'
       : event.reason === 'invalid-credential'
-        ? 'The cloud relay could not verify this presenter session (`invalid-credential`). The phone has not connected yet.'
-        : 'The presenter connection was rejected. Disconnect and try again.';
+        ? 'The presenter session could not be verified (`invalid-credential`). Disconnect all, then create a new session.'
+        : 'The presenter connection was rejected. Disconnect all, then create a new session.';
     setPairingStatus(rejectionMessage);
     return;
   }

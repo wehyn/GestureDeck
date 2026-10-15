@@ -141,6 +141,13 @@ test('rejection and close are reported; closed clients send nothing and never re
   assert.equal(socket.sent.length, 1);
 });
 
+test('reasonless presenter rejection is forwarded for the UI fallback', () => {
+  const { socket, events } = setup();
+  socket.open();
+  socket.message({ type: 'presenterRejected' });
+  assert.deepEqual(events, [{ type: 'rejected' }]);
+});
+
 test('explicit close prevents late open, ready, command and state sends', () => {
   const { client, socket, commands } = setup();
   client.publishState({ index: 0, total: 4, busy: false });

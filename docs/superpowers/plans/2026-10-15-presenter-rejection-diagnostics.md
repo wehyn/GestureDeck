@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development` or execute this plan task by task with implementation review.
 
-**Goal:** Show which presenter-authentication rejection category the cloud relay reported in the hosted pairing dialog.
+**Goal:** Show which presenter-authentication rejection category the server reported in the pairing dialog.
 
-**Architecture:** Reuse the `reason` already emitted by `createMobileRemoteClient` when it receives `presenterRejected`. Map the known `already-connected` and `invalid-credential` values to fixed, safe messages in `app.js`, and retain the existing generic message for absent or unknown reasons. Keep session authentication, session lifecycle, and both disconnect actions unchanged.
+**Architecture:** Reuse the optional `reason` emitted by `createMobileRemoteClient` for `presenterRejected`. Map known values to fixed, safe messages in `app.js`, use a generic message for absent or unknown reasons, and preserve that status when the rejected socket closes. Keep session creation, authentication, leases, and both disconnect actions unchanged.
 
 **Tech Stack:** Browser JavaScript modules, existing mobile remote client event callback, hosted pairing dialog live status region.
 
@@ -12,28 +12,33 @@
 
 ## File map
 
-- `app.js` — map the existing presenter rejection reason to a fixed status message. This file owns the dialog status and currently discards the reason.
-- `src/mobile-remote-client.js` — read only. It already validates and forwards the reason; no edit is planned.
+- `app.js` — map presenter rejection reasons to fixed status messages and preserve the rejection status until the user disconnects.
+- `src/mobile-remote-client.js` — forward `presenterRejected` events when the reason is absent, while continuing to reject extra payload fields.
 - `src/cloud-remote-redis-server.js` — read only. It emits the known `already-connected` and `invalid-credential` rejection categories; no server behavior change is planned.
+- `tests/app.test.js` and `tests/mobile-remote-client.test.js` — cover safe reason mapping, the missing-reason fallback, and rejection status surviving socket close.
 
 ### Task 1: Display the safe presenter rejection category
 
 **Files:**
-- Modify: `app.js:883-913`
+- Modify: `app.js`
+- Modify: `src/mobile-remote-client.js`
+- Modify: `tests/app.test.js`
+- Modify: `tests/mobile-remote-client.test.js`
 
 - [ ] **Step 1: Map only known reason values to fixed messages.**
 
-In `handleMobileRemoteConnection`, keep `clearPairingMaterial()` and replace the unconditional rejection status with a static mapping:
+In `handleMobileRemoteConnection`, keep `clearPairingMaterial()` and use fixed messages for the two known reasons and the safe fallback:
 
 ```js
   if (event.type === 'rejected') {
     clearPairingMaterial();
-    const rejectionMessages = {
-      'already-connected': 'Another presenter connection already owns this session (`already-connected`). Disconnect all, then create a new session.',
-      'invalid-credential': 'The cloud relay could not verify this presenter session (`invalid-credential`). The phone has not connected yet.',
-    };
-    setPairingStatus(rejectionMessages[event.reason]
-      ?? 'The presenter connection was rejected. Disconnect and try again.');
+    presenterConnectionRejected = true;
+    const rejectionMessage = event.reason === 'already-connected'
+      ? 'The presenter session was rejected as already in use (`already-connected`). Disconnect all, then create a new session.'
+      : event.reason === 'invalid-credential'
+        ? 'The presenter session could not be verified (`invalid-credential`). Disconnect all, then create a new session.'
+        : 'The presenter connection was rejected. Disconnect all, then create a new session.';
+    setPairingStatus(rejectionMessage);
     return;
   }
 ```
@@ -42,33 +47,33 @@ Do not render `event.reason` directly or display any session ID, host credential
 
 - [ ] **Step 2: Review the edited branch against the approved design.**
 
-Confirm the rejection path still clears QR/link material, still returns before handling later events, and only renders the two fixed known messages or the generic fallback. Confirm no changes were made to `disconnect-phone`, `stopMobileRemote`, `src/mobile-remote-client.js`, or `src/cloud-remote-redis-server.js`.
+Confirm the client forwards reasonless rejections without forwarding extra fields, the app renders only fixed messages, and a following socket close leaves the message and **Disconnect all** action available. Confirm session authentication and server behavior are unchanged.
 
 - [ ] **Step 3: Check the patch for whitespace errors.**
 
-Run:
+Run the focused tests and whitespace check:
 
 ```bash
+node --test tests/app.test.js tests/mobile-remote-client.test.js
 git diff --check
 ```
 
-Expected: no output and exit status `0`.
+Expected: both tests pass; `git diff --check` prints nothing and exits `0`.
 
 - [ ] **Step 4: Commit the focused change.**
 
 ```bash
-git add app.js
-git commit -m "fix: show presenter rejection reason"
+git add app.js src/mobile-remote-client.js tests/app.test.js tests/mobile-remote-client.test.js docs/superpowers/specs/2026-10-15-presenter-rejection-diagnostics-design.md docs/superpowers/plans/2026-10-15-presenter-rejection-diagnostics.md
+git commit -m "fix: clarify presenter rejection recovery"
 ```
 
 ## Delivery boundary
 
-- This plan changes the local implementation only. It does not deploy the hosted site, create a production pairing session, push to either GitHub repository, or update a pull request.
-- Do not add or run tests as part of this plan; the user asked to try the diagnostic first, and has not requested test execution. If the user requests verification, add focused coverage for both known reasons and the generic fallback before running it.
+- PR updates and merge follow the repository review workflow. This plan does not authorize a production deployment or production pairing attempt.
 
 ## Plan self-review
 
-- **Spec coverage:** Task 1 covers both known reasons, the safe fallback, QR/link clearing, unchanged disconnect actions, and no raw server data. The file map keeps all auth and relay files read only.
+- **Spec coverage:** Task 1 covers both known reasons, missing and unknown reason fallbacks, rejection status through socket close, and the explicit disconnect action. The server auth and relay files remain read only.
 - **Placeholder scan:** The implementation snippet, review boundaries, exact command, and commit command are specified. No TODO or TBD remains.
 - **Consistency:** The plan uses the event `reason` emitted by `src/mobile-remote-client.js` and the same reason values returned by the cloud relay. Unknown values do not become user-visible text.
-- **Validation boundary:** `git diff --check` is the only command in the plan. No tests or production changes are included unless the user asks later.
+- **Validation boundary:** The app and client contract tests plus `git diff --check` cover this repair. No production deployment or pairing attempt is included.
