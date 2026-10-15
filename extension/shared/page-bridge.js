@@ -1,4 +1,4 @@
-import { isLoopbackControllerUrl } from './protocol.js';
+import { isGestureDeckControllerUrl } from './protocol.js';
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -31,7 +31,7 @@ export function createCanvaExtensionBridge({
     || typeof clearTimeoutImpl !== 'function') throw new TypeError('Bridge callbacks must be functions');
 
   const origin = windowImpl.location.origin;
-  const available = isLoopbackControllerUrl(`${origin}/`);
+  const available = isGestureDeckControllerUrl(`${origin}/`);
   const pending = new Map();
   const subscribers = new Set();
   let state = { connected: false, ready: false };

@@ -137,17 +137,23 @@ async function waitFor(predicate) {
 
 async function createPopupHarness() {
   const source = await readFile(new URL('../extension/popup/popup.js', import.meta.url), 'utf8');
-  const elements = new Map(['status', 'connect', 'disconnect'].map((id) => [id, {
+  const markup = await readFile(new URL('../extension/popup/popup.html', import.meta.url), 'utf8');
+  const ids = [...markup.matchAll(/\bid="([^"]+)"/g)].map(([, id]) => id);
+  const elements = new Map(ids.map((id) => [id, {
     hidden: false,
     textContent: '',
     listeners: new Map(),
     addEventListener(type, callback) { this.listeners.set(type, callback); },
   }]));
   const requests = [];
+  const openedTabs = [];
   const context = {
     document: { getElementById: (id) => elements.get(id) },
     chrome: {
-      tabs: { async query() { return [{ id: 7 }]; } },
+      tabs: {
+        async query() { return [{ id: 7 }]; },
+        async create({ url }) { openedTabs.push(url); },
+      },
       runtime: {
         sendMessage(message) {
           const response = deferred();
@@ -159,7 +165,7 @@ async function createPopupHarness() {
   };
   context.globalThis = context;
   runInNewContext(source, context);
-  return { elements, requests };
+  return { elements, requests, openedTabs };
 }
 
 test('extension protocol allows only loopback controller pages and Canva navigation', () => {
@@ -183,12 +189,12 @@ test('extension protocol allows only loopback controller pages and Canva navigat
   assert.equal(presentationKeyForAction('goTo'), null);
 });
 
-test('extension permissions stay limited to the selected tab and loopback controller', async () => {
+test('extension permissions stay limited to the selected tab and approved controller origins', async () => {
   const manifest = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
   assert.equal(manifest.manifest_version, 3);
   assert.deepEqual([...manifest.permissions].sort(), ['activeTab', 'scripting', 'storage']);
   assert.deepEqual(manifest.content_scripts[0].matches.sort(), [
-    'http://127.0.0.1/*', 'http://localhost/*',
+    'http://127.0.0.1/*', 'http://localhost/*', 'https://gesturedeck-two.vercel.app/*',
   ]);
   assert.equal(manifest.action.default_popup, 'popup/popup.html');
   assert.equal(manifest.background.service_worker, 'background/service-worker.js');
@@ -213,6 +219,33 @@ test('popup includes the active tab ID in its Connect request', async () => {
   assert.equal(request.tabId, 7);
   assert.deepEqual(Object.keys(request).sort(), ['tabId', 'type']);
   for (const pending of popup.requests) pending.resolve({ connected: false, ready: false });
+});
+
+test('popup opens hosted phone pairing only for a ready Canva presentation', async () => {
+  const popup = await createPopupHarness();
+  const pairingButton = popup.elements.get('show-phone-pairing');
+  const pairingHint = popup.elements.get('phone-pairing-hint');
+
+  popup.requests.find(({ message }) => message.type === 'popup-status')
+    .resolve({ connected: true, ready: false });
+  await waitFor(() => popup.elements.get('status').textContent === 'Canva tab selected, but presentation mode is not ready.');
+  assert.equal(pairingButton.disabled, true);
+  assert.equal(pairingHint.hidden, false);
+  pairingButton.listeners.get('click')();
+  assert.deepEqual(popup.openedTabs, []);
+
+  popup.elements.get('connect').listeners.get('click')();
+  await waitFor(() => popup.requests.some(({ message }) => message.type === 'popup-connect'));
+  popup.requests.find(({ message }) => message.type === 'popup-connect')
+    .resolve({ connected: true, ready: true });
+  await waitFor(() => pairingButton.disabled === false);
+  assert.equal(pairingHint.hidden, true);
+
+  pairingButton.listeners.get('click')();
+  await waitFor(() => popup.openedTabs.length === 1);
+  assert.deepEqual(popup.openedTabs, [
+    'https://gesturedeck-two.vercel.app/workspace.html?experience=cloud&connect=phone',
+  ]);
 });
 
 test('popup ignores an older status response after a Connect request succeeds', async () => {

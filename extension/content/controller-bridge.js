@@ -1,5 +1,17 @@
-if ((location.hostname === '127.0.0.1' || location.hostname === 'localhost')
-  && ['/', '/workspace.html'].includes(location.pathname)) {
+function isGestureDeckControllerPage(value) {
+  try {
+    const url = new URL(value);
+    return !url.username && !url.password
+      && ['/', '/workspace.html'].includes(url.pathname)
+      // Keep these origins synchronized with PRODUCTION_CONTROLLER_ORIGIN and manifest.json matches.
+      && ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://gesturedeck-two.vercel.app']
+        .includes(url.origin);
+  } catch {
+    return false;
+  }
+}
+
+if (isGestureDeckControllerPage(location.href)) {
   const origin = location.origin;
   let port;
 

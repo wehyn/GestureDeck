@@ -150,7 +150,9 @@ class MemoryRedis {
       const leaseKey = legacy ? keys[5] : keys[4];
       if (!session?.active || (!paired && !legacy)) return 'invalid';
       if (this.values.get(leaseKey) !== args[6]) return 'invalid';
-      if (args[1] === 'goTo' && Number(args[2]) >= session.state.total) return 'out-of-range';
+      if (session.state.target === 'canva' && session.state.ready !== true) return 'not-ready';
+      if (args[1] === 'goTo'
+        && (session.state.target === 'canva' || Number(args[2]) >= session.state.total)) return 'out-of-range';
       if (this.commandKeys.has(keys[1])) return 'duplicate';
       this.commandKeys.add(keys[1]);
       if (args[5] === '1') this.#publish(keys[2], keys[3], JSON.parse(args[4]));
@@ -453,6 +455,25 @@ test('hosted Redis relay pairs multiple phones, broadcasts state, and routes ack
     type: 'commandAck', id: 'first-command', accepted: true,
   });
   assert.equal(second.peer.messages.some((message) => message.type === 'commandAck'), false);
+});
+
+test('hosted Redis relay rejects Canva commands until the target is ready', async (t) => {
+  const fixture = await createFixture();
+  t.after(() => fixture.close());
+  const presenter = await fixture.presenter();
+  const phone = await fixture.pairPhone(presenter);
+
+  presenter.send({ type: 'state', target: 'canva', ready: false, index: null, total: null, busy: false });
+  await phone.peer.waitFor('state', (message) => message.target === 'canva');
+  phone.peer.send({ type: 'command', id: 'canva-not-ready', action: 'next' });
+
+  await assert.rejects(
+    presenter.waitFor('command', (message) => message.id.endsWith('.canva-not-ready'), 100),
+    /Timed out waiting for command/,
+  );
+  assert.deepEqual(await phone.peer.waitFor('commandAck'), {
+    type: 'commandAck', id: 'canva-not-ready', accepted: false,
+  });
 });
 
 test('hosted Redis relay routes phone lists, state, commands, and acknowledgements across function instances', async (t) => {

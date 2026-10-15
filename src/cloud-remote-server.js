@@ -84,8 +84,16 @@ function sessionIdFromTarget(target, route) {
 }
 
 function sanitizeState(value) {
-  if (!isRecord(value)
-    || !Number.isSafeInteger(value.index)
+  if (!isRecord(value)) return null;
+  if (value.target === 'canva') {
+    const keys = Object.keys(value).filter((key) => key !== 'type').sort().join(',');
+    if (keys !== 'busy,index,ready,target,total'
+      || value.type !== undefined && value.type !== 'state'
+      || typeof value.ready !== 'boolean'
+      || value.index !== null || value.total !== null || value.busy !== false) return null;
+    return { target: 'canva', ready: value.ready, index: null, total: null, busy: false };
+  }
+  if (!Number.isSafeInteger(value.index)
     || !Number.isSafeInteger(value.total)
     || value.total < 1
     || value.index < 0 || value.index >= value.total

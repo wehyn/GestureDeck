@@ -332,6 +332,7 @@ export function createMobileRemoteSession({
         && keys[3] === 'type'
         && Number.isSafeInteger(message.index)
         && message.index >= 0
+        && state.target !== 'canva'
         && (!checkBounds || message.index < state.total);
     }
     return false;

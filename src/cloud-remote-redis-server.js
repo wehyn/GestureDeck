@@ -162,7 +162,14 @@ local legacy = not found and session.phoneCredential == ARGV[1]
 if not found and not legacy then return 'invalid' end
 local leaseKey = legacy and KEYS[6] or KEYS[5]
 if redis.call('GET', leaseKey) ~= ARGV[7] then return 'invalid' end
-if ARGV[2] == 'goTo' and tonumber(ARGV[3]) >= session.state.total then return 'out-of-range' end
+if session.state.target == 'canva' and session.state.ready ~= true then
+  return 'not-ready'
+end
+if ARGV[2] == 'goTo' then
+  if session.state.target == 'canva' or tonumber(ARGV[3]) >= session.state.total then
+    return 'out-of-range'
+  end
+end
 if redis.call('SET', KEYS[2], 'pending', 'NX', 'EX', ARGV[4]) == false then return 'duplicate' end
 if ARGV[6] == '1' then
   local eventId = redis.call('XADD', KEYS[3], 'MAXLEN', '~', 2000, '*', 'data', ARGV[5])
@@ -287,11 +294,12 @@ local now = tonumber(ARGV[2])
 if tonumber(session.expiresAt or 0) <= now then return 'ended' end
 local ttl = math.max(1, math.ceil((session.expiresAt - now) / 1000))
 redis.call('SET', KEYS[1], cjson.encode(session), 'EX', ttl)
-local message = cjson.encode({type = 'state', index = session.state.index,
-  total = session.state.total, busy = session.state.busy})
-local eventId = redis.call('XADD', KEYS[3], 'MAXLEN', '~', 2000, '*', 'data', message)
+local message = {type = 'state'}
+for field, value in pairs(session.state) do message[field] = value end
+local encodedMessage = cjson.encode(message)
+local eventId = redis.call('XADD', KEYS[3], 'MAXLEN', '~', 2000, '*', 'data', encodedMessage)
 redis.call('EXPIRE', KEYS[3], ARGV[4])
-redis.call('PUBLISH', KEYS[4], cjson.encode({eventId = eventId, message = cjson.decode(message)}))
+redis.call('PUBLISH', KEYS[4], cjson.encode({eventId = eventId, message = message}))
 return 'ok'
 `;
 
@@ -441,7 +449,16 @@ function sessionIdFromTarget(target, route, webSocketFunctionPath) {
 }
 
 function sanitizeState(value) {
-  if (!isRecord(value) || !Number.isSafeInteger(value.index) || !Number.isSafeInteger(value.total)
+  if (!isRecord(value)) return null;
+  if (value.target === 'canva') {
+    const keys = Object.keys(value).filter((key) => key !== 'type').sort().join(',');
+    if (keys !== 'busy,index,ready,target,total'
+      || value.type !== undefined && value.type !== 'state'
+      || typeof value.ready !== 'boolean'
+      || value.index !== null || value.total !== null || value.busy !== false) return null;
+    return { target: 'canva', ready: value.ready, index: null, total: null, busy: false };
+  }
+  if (!Number.isSafeInteger(value.index) || !Number.isSafeInteger(value.total)
     || value.total < 1 || value.index < 0 || value.index >= value.total || typeof value.busy !== 'boolean') return null;
   return { index: value.index, total: value.total, busy: value.busy };
 }

@@ -13,4 +13,5 @@ h1 { margin: 0 0 12px; font-size: 20px; }
 button { width: 100%; min-height: 42px; border: 0; border-radius: 8px; padding: 9px 12px; color: white; background: #176b4b; font: inherit; font-weight: 700; cursor: pointer; }
 button:focus-visible { outline: 3px solid #9bd9b9; outline-offset: 2px; }
 #disconnect { margin-top: 8px; color: #21332b; background: #e2ebe5; }
+#show-phone-pairing:disabled { cursor: not-allowed; opacity: 0.58; }
 .hint { margin: 12px 0 0; color: #5c6c64; font-size: 12px; }
