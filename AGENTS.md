@@ -5,8 +5,8 @@
 - Check the running source and configuration before relying on `spec.md` or dated files under `docs/superpowers/`; they are design records and may describe proposals that are not current features.
 - `app.js` coordinates the browser workspace. Feature modules live in `src/`; the Chrome extension lives in `extension/`; the local server is `server.mjs`; Vercel function entry points are in `api/`; automated tests are in `tests/`.
 - When changing extension controller origins or message actions, keep `extension/manifest.json`, `extension/content/controller-bridge.js`, `extension/shared/protocol.js`, `extension/shared/page-bridge.js`, and `tests/canva-extension.test.js` in sync.
-- When changing browser imports or assets, update both the public path allowlist in `server.mjs` and the copy list in `scripts/build-vercel.mjs`.
-- When changing static file serving, preserve the explicit public allowlist and realpath checks in `server.mjs`.
+- Keep `scripts/build-vercel.mjs`'s explicit copies current when adding or removing browser assets. The dev server already exposes `src/`, `assets/`, and selected dependency directories; add other new public files to `server.mjs`'s root-file allowlist.
+- Preserve the explicit public path allowlist and realpath checks in `server.mjs`; the phone server has its own asset allowlist and realpath check in `src/mobile-remote-server.js`.
 
 ## Data and remote-control boundaries
 
@@ -25,7 +25,3 @@
 - Popup tests build their fixture from `extension/popup/popup.html`; update the tests when the markup changes. Redis tests use a fake Redis model and do not execute the production Lua scripts.
 - Test doubles cover local contracts. They do not establish real camera/browser behavior, physical-phone pairing, signed-in Canva behavior, or a deployed Redis/Vercel path; report those boundaries accurately.
 - Keep README setup, supported targets, network requirements, and privacy statements aligned with user-visible behavior.
-
-## Delegation
-
-- Delegate only when at least two independent, bounded workstreams can run in parallel. Keep planning, integration, and final verification with the parent; give each delegate a concrete deliverable and non-overlapping file ownership. Prefer parallel research, testing, or review over parallel edits.

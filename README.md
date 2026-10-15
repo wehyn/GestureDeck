@@ -19,9 +19,9 @@ Camera access starts only after **Start setup**. For local camera access, keep t
 
 | Option | Presenter and phone requirements | Controls |
 | --- | --- | --- |
-| Local remote | Same trusted Wi-Fi or Tailscale network; no internet required | Sample deck or PDF in the presenter browser |
+| Local remote | Same trusted Wi-Fi or Tailscale network; Canva still needs internet | Sample deck, PDF, or a connected Canva tab (with extension) |
 | Canva remote | Chrome extension, Canva Present/View tab, and either the local or hosted GestureDeck workspace | Previous/Next in the selected Canva tab |
-| Hosted remote | HTTPS GestureDeck deployment with Redis configured; devices may use different networks | Sample deck, PDF, or a connected Canva tab |
+| Hosted remote | HTTPS GestureDeck deployment with Redis configured; devices may use different networks | Sample deck, PDF, or Canva on a supported workspace origin |
 
 ### Use the local phone remote
 
@@ -40,7 +40,7 @@ The presenter can remove one phone or disconnect everyone. Each phone can discon
 3. For local pairing, follow [Use the local phone remote](#use-the-local-phone-remote).
 4. For hosted pairing, choose **Show phone QR/link** in the extension popup. The extension opens the hosted workspace at `https://gesturedeck-two.vercel.app/workspace.html?experience=cloud&connect=phone`; scan its QR code or copy the link.
 
-The extension does not request camera access. Canva editing mode is refused. If the selected tab leaves Present or View mode, navigation is disabled. Canva does not report slide position or count, so phones show readiness and Previous/Next only. The hosted workspace must stay open during a hosted Canva session.
+The extension does not request camera access. It supports `localhost:5173`, `127.0.0.1:5173`, and the production host above; a self-hosted domain must be added to the extension's origin allowlists. Canva editing mode is refused. If the selected tab leaves Present or View mode, navigation is disabled. Canva does not report slide position or count, so phones show readiness and Previous/Next only. The hosted workspace must stay open during a hosted Canva session.
 
 ### Use the hosted phone remote
 
@@ -55,7 +55,7 @@ The Vercel deployment uses Upstash Redis for temporary session and relay state. 
 - The local phone remote sends pairing credentials, phone labels, target readiness, slide position and busy state when available, and navigation commands. It does not send camera data or presentation media.
 - Hosted sessions use Redis for temporary pairing credentials, phone metadata, target readiness, slide position, busy state, and navigation commands. Sessions expire after up to four hours and invites after five minutes. The relay does not receive PDFs, slide content, rendered pages, notes, Canva credentials, or camera data.
 
-The hosted relay is needed when phones connect from another network. The local sample deck, PDF presentation, and hand tracking work offline after dependencies are installed.
+Use the hosted relay when phones cannot reach the presenter over the same LAN or Tailscale network. The local sample deck, PDF presentation, and hand tracking work offline after dependencies are installed.
 
 ## Development
 
