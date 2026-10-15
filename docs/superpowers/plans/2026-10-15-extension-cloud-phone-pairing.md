@@ -146,7 +146,8 @@ This waits for the bridge request to resolve before auto-starting. The existing 
 ## Delivery to both repositories
 
 - [ ] Push the completed `codex/sync-hornley-to-wehyn` branch to `wehyn/GestureDeck` to update its existing open PR #4.
-- [ ] Push the same feature commit to `hornley/GestureDeck` and open a follow-up PR against `main`, because the previous hosted Canva PR #5 is already merged.
+- [ ] Create a clean follow-up branch from `hornley/main`, which already contains the prior merged integration and hosted Canva work. Cherry-pick only this shortcut's design spec, implementation plan, and popup/app/README commits onto it so the follow-up PR contains no previously merged code.
+- [ ] Push the clean branch to `hornley/GestureDeck` and open a follow-up PR against `main`, because the previous hosted Canva PR #5 is already merged.
 - [ ] Link the new Hornley PR to this T3 thread immediately after creating it.
 
 ## Plan self-review
