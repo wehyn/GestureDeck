@@ -135,7 +135,7 @@ async function waitFor(predicate) {
   assert.fail('expected the extension worker to answer');
 }
 
-async function createPopupHarness() {
+async function createPopupHarness({ createTab } = {}) {
   const source = await readFile(new URL('../extension/popup/popup.js', import.meta.url), 'utf8');
   const markup = await readFile(new URL('../extension/popup/popup.html', import.meta.url), 'utf8');
   const ids = [...markup.matchAll(/\bid="([^"]+)"/g)].map(([, id]) => id);
@@ -152,7 +152,10 @@ async function createPopupHarness() {
     chrome: {
       tabs: {
         async query() { return [{ id: 7 }]; },
-        async create({ url }) { openedTabs.push(url); },
+        async create({ url }) {
+          if (createTab) return createTab({ url });
+          openedTabs.push(url);
+        },
       },
       runtime: {
         sendMessage(message) {
@@ -246,6 +249,34 @@ test('popup opens hosted phone pairing only for a ready Canva presentation', asy
   assert.deepEqual(popup.openedTabs, [
     'https://gesturedeck-two.vercel.app/workspace.html?experience=cloud&connect=phone',
   ]);
+});
+
+test('popup keeps hosted phone pairing disabled while Canva is disconnected', async () => {
+  const popup = await createPopupHarness();
+  const pairingButton = popup.elements.get('show-phone-pairing');
+  const pairingHint = popup.elements.get('phone-pairing-hint');
+
+  popup.requests.find(({ message }) => message.type === 'popup-status')
+    .resolve({ connected: false, ready: false });
+  await waitFor(() => popup.elements.get('status').textContent === 'No Canva presentation connected.');
+
+  assert.equal(pairingButton.disabled, true);
+  assert.equal(pairingHint.hidden, false);
+});
+
+test('popup shows the expected message when opening hosted phone pairing fails', async () => {
+  const popup = await createPopupHarness({
+    async createTab() { throw new Error('tab creation failed'); },
+  });
+  const pairingButton = popup.elements.get('show-phone-pairing');
+
+  popup.requests.find(({ message }) => message.type === 'popup-status')
+    .resolve({ connected: true, ready: true });
+  await waitFor(() => pairingButton.disabled === false);
+
+  pairingButton.listeners.get('click')();
+  await waitFor(() => popup.elements.get('status').textContent
+    === 'Could not open the hosted phone pairing page. Try again.');
 });
 
 test('popup ignores an older status response after a Connect request succeeds', async () => {
