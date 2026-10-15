@@ -22,6 +22,9 @@ function isLocalNetworkHost(hostname) {
 
 const cloudExperience = new URLSearchParams(globalThis.location?.search ?? '').get('experience') === 'cloud'
   && !isLocalNetworkHost(globalThis.location?.hostname);
+const autoStartCloudPairing = cloudExperience
+  && globalThis.location?.origin === 'https://gesturedeck-two.vercel.app'
+  && new URLSearchParams(globalThis.location?.search ?? '').get('connect') === 'phone';
 const elements = {
   startSetup: $('start-setup'),
   startSession: $('start-session'),
@@ -854,7 +857,7 @@ async function loadPairingInterfaces() {
   }
 }
 
-function openPairingDialog() {
+function openPairingDialog({ startCloudSession = true } = {}) {
   if (!elements.pairingDialog) return;
   pairingReturnFocus = document.activeElement ?? elements.connectPhone;
   if (!elements.pairingDialog.open) elements.pairingDialog.showModal();
@@ -863,7 +866,7 @@ function openPairingDialog() {
     setText($('pairing-title'), 'Connect your phone');
     setText($('pairing-description'), 'Scan the code with your phone. Your PDF stays in this browser; the phone receives slide controls only.');
     setText(elements.startPhoneRemote, 'Create pairing link');
-    void startCloudMobileRemote();
+    if (startCloudSession) void startCloudMobileRemote();
     elements.pairingStatus?.focus?.({ preventScroll: true });
     return;
   }
@@ -1655,7 +1658,18 @@ if (elements.reverseMapping) {
 }
 
 canvaExtensionBridge.subscribe(updateCanvaTarget);
-void canvaExtensionBridge.requestStatus().then(updateCanvaTarget);
+void canvaExtensionBridge.requestStatus().then((targetState) => {
+  updateCanvaTarget(targetState);
+  if (!autoStartCloudPairing) return;
+
+  if (targetState?.connected === true && targetState?.ready === true) {
+    openPairingDialog();
+    return;
+  }
+
+  openPairingDialog({ startCloudSession: false });
+  setPairingStatus('Canva is not ready. Connect a presentation in Present or View mode, then open phone pairing again.');
+});
 
 bindEvents();
 if (cloudExperience) {
