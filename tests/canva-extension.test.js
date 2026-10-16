@@ -55,6 +55,8 @@ function fakeChrome(activeTabUrl) {
   const storage = {};
   const tabMessages = [];
   const injections = [];
+  const debuggerCalls = [];
+  let debuggerFailure;
   const tab = { id: 7, url: activeTabUrl };
   const tabsById = new Map([[tab.id, tab]]);
   let activeTab = tab;
@@ -84,13 +86,26 @@ function fakeChrome(activeTabUrl) {
         const selected = tabsById.get(tabId);
         if (!selected) throw new Error('missing tab');
         if (message.type === 'probe') return { ready: isCanvaPresentationUrl(selected.url) };
-        return { accepted: true, ready: isCanvaPresentationUrl(selected.url) };
+        return undefined;
       },
     },
     scripting: { async executeScript(details) { injections.push(details); } },
+    debugger: {
+      async attach(target, version) {
+        debuggerCalls.push({ operation: 'attach', target, version });
+        if (debuggerFailure?.operation === 'attach') throw new Error('debugger attach failed');
+      },
+      async sendCommand(target, method, params) {
+        debuggerCalls.push({ operation: 'sendCommand', target, method, params });
+        if (debuggerFailure?.operation === 'sendCommand'
+          && debuggerFailure.type === params.type) throw new Error('debugger command failed');
+      },
+      async detach(target) { debuggerCalls.push({ operation: 'detach', target }); },
+    },
   };
   return {
-    chromeApi, storage, tabMessages, injections, tab, tabsById,
+    chromeApi, storage, tabMessages, injections, debuggerCalls, tab, tabsById,
+    failDebugger(failure) { debuggerFailure = failure; },
     setActiveTab(selected) {
       tabsById.set(selected.id, selected);
       activeTab = selected;
@@ -195,7 +210,7 @@ test('extension protocol allows only loopback controller pages and Canva navigat
 test('extension permissions stay limited to the selected tab and approved controller origins', async () => {
   const manifest = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
   assert.equal(manifest.manifest_version, 3);
-  assert.deepEqual([...manifest.permissions].sort(), ['activeTab', 'scripting', 'storage']);
+  assert.deepEqual([...manifest.permissions].sort(), ['activeTab', 'debugger', 'scripting', 'storage']);
   assert.deepEqual(manifest.content_scripts[0].matches.sort(), [
     'http://127.0.0.1/*', 'http://localhost/*', 'https://gesturedeck-two.vercel.app/*',
   ]);
@@ -402,7 +417,7 @@ test('extension bridge drops stale readiness when status or navigation requests 
   bridge.close();
 });
 
-test('extension binds only a presentation tab and routes phone navigation to that tab', async () => {
+test('extension binds a presentation tab and sends real navigation keys to that tab', async () => {
   const fake = fakeChrome('https://www.canva.com/design/deck-1/present');
   createCanvaExtensionWorker(fake.chromeApi);
   assert.deepEqual(await connectToActivePopupTab(fake.chromeApi), {
@@ -418,12 +433,150 @@ test('extension binds only a presentation tab and routes phone navigation to tha
     command: 'navigate', action: 'next',
   });
   await waitFor(() => port.sent.some((message) => message.id === 'next-1'));
-  assert.deepEqual(fake.tabMessages.find(({ message }) => message.type === 'keypress'), {
-    tabId: 7, message: { type: 'keypress', key: 'ArrowRight' },
-  });
+  assert.deepEqual(fake.debuggerCalls, [
+    { operation: 'attach', target: { tabId: 7 }, version: '1.3' },
+    {
+      operation: 'sendCommand', target: { tabId: 7 }, method: 'Input.dispatchKeyEvent',
+      params: {
+        type: 'keyDown', key: 'ArrowRight', code: 'ArrowRight',
+        windowsVirtualKeyCode: 39,
+      },
+    },
+    {
+      operation: 'sendCommand', target: { tabId: 7 }, method: 'Input.dispatchKeyEvent',
+      params: {
+        type: 'keyUp', key: 'ArrowRight', code: 'ArrowRight',
+        windowsVirtualKeyCode: 39,
+      },
+    },
+    { operation: 'detach', target: { tabId: 7 } },
+  ]);
   assert.deepEqual(port.sent.find((message) => message.id === 'next-1'), {
     source: 'gesturedeck-extension', type: 'canva-controller-response',
     id: 'next-1', command: 'navigate', accepted: true,
+  });
+
+  port.onMessage.fire({
+    source: 'gesturedeck', type: 'canva-controller-request', id: 'previous-1',
+    command: 'navigate', action: 'previous',
+  });
+  await waitFor(() => port.sent.some((message) => message.id === 'previous-1'));
+  const previousEvents = fake.debuggerCalls.slice(4);
+  assert.deepEqual(previousEvents, [
+    { operation: 'attach', target: { tabId: 7 }, version: '1.3' },
+    {
+      operation: 'sendCommand', target: { tabId: 7 }, method: 'Input.dispatchKeyEvent',
+      params: {
+        type: 'keyDown', key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37,
+      },
+    },
+    {
+      operation: 'sendCommand', target: { tabId: 7 }, method: 'Input.dispatchKeyEvent',
+      params: {
+        type: 'keyUp', key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37,
+      },
+    },
+    { operation: 'detach', target: { tabId: 7 } },
+  ]);
+  assert.deepEqual(port.sent.find((message) => message.id === 'previous-1'), {
+    source: 'gesturedeck-extension', type: 'canva-controller-response',
+    id: 'previous-1', command: 'navigate', accepted: true,
+  });
+});
+
+test('extension rejects navigation when Chrome debugger cannot attach', async () => {
+  const fake = fakeChrome('https://www.canva.com/design/deck-1/present');
+  createCanvaExtensionWorker(fake.chromeApi);
+  await connectToActivePopupTab(fake.chromeApi);
+  const port = new FakePort('controller', { url: 'http://127.0.0.1:5173/' });
+  fake.chromeApi.runtime.onConnect.fire(port);
+  await waitFor(() => port.sent.some((message) => message.type === 'canva-target-state'));
+  fake.failDebugger({ operation: 'attach' });
+
+  port.onMessage.fire({
+    source: 'gesturedeck', type: 'canva-controller-request', id: 'attach-failed',
+    command: 'navigate', action: 'next',
+  });
+  await waitFor(() => port.sent.some((message) => message.id === 'attach-failed'));
+
+  assert.deepEqual(fake.debuggerCalls, [
+    { operation: 'attach', target: { tabId: 7 }, version: '1.3' },
+  ]);
+  assert.deepEqual(port.sent.find((message) => message.id === 'attach-failed'), {
+    source: 'gesturedeck-extension', type: 'canva-controller-response',
+    id: 'attach-failed', command: 'navigate', accepted: false,
+  });
+});
+
+test('extension serializes overlapping navigation commands for one Canva tab', async () => {
+  const fake = fakeChrome('https://www.canva.com/design/deck-1/present');
+  createCanvaExtensionWorker(fake.chromeApi);
+  await connectToActivePopupTab(fake.chromeApi);
+  const port = new FakePort('controller', { url: 'http://127.0.0.1:5173/' });
+  fake.chromeApi.runtime.onConnect.fire(port);
+  await waitFor(() => port.sent.some((message) => message.type === 'canva-target-state'));
+
+  const firstAttachGate = deferred();
+  const attach = fake.chromeApi.debugger.attach.bind(fake.chromeApi.debugger);
+  let attachCount = 0;
+  let maxConcurrentAttaches = 0;
+  fake.chromeApi.debugger.attach = async (...args) => {
+    attachCount += 1;
+    maxConcurrentAttaches = Math.max(maxConcurrentAttaches, attachCount);
+    try {
+      await firstAttachGate.promise;
+      await attach(...args);
+    } finally {
+      attachCount -= 1;
+    }
+  };
+  port.onMessage.fire({
+    source: 'gesturedeck', type: 'canva-controller-request', id: 'overlap-next',
+    command: 'navigate', action: 'next',
+  });
+  port.onMessage.fire({
+    source: 'gesturedeck', type: 'canva-controller-request', id: 'overlap-previous',
+    command: 'navigate', action: 'previous',
+  });
+  await waitFor(() => maxConcurrentAttaches > 0);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(maxConcurrentAttaches, 1);
+
+  firstAttachGate.resolve();
+  await waitFor(() => port.sent.some((message) => message.id === 'overlap-next')
+    && port.sent.some((message) => message.id === 'overlap-previous'));
+  assert.equal(maxConcurrentAttaches, 1);
+  assert.deepEqual(fake.debuggerCalls.filter(({ operation, params }) => (
+    operation === 'sendCommand' && params.type === 'keyDown'
+  )).map(({ params }) => params.key), ['ArrowRight', 'ArrowLeft']);
+  assert.equal(fake.debuggerCalls.filter(({ operation }) => operation === 'attach').length, 2);
+  assert.equal(fake.debuggerCalls.filter(({ operation }) => operation === 'detach').length, 2);
+  assert.equal(port.sent.find((message) => message.id === 'overlap-next').accepted, true);
+  assert.equal(port.sent.find((message) => message.id === 'overlap-previous').accepted, true);
+});
+
+test('extension rejects navigation when key release fails and still detaches debugger', async () => {
+  const fake = fakeChrome('https://www.canva.com/design/deck-1/present');
+  createCanvaExtensionWorker(fake.chromeApi);
+  await connectToActivePopupTab(fake.chromeApi);
+  const port = new FakePort('controller', { url: 'http://127.0.0.1:5173/' });
+  fake.chromeApi.runtime.onConnect.fire(port);
+  await waitFor(() => port.sent.some((message) => message.type === 'canva-target-state'));
+  fake.failDebugger({ operation: 'sendCommand', type: 'keyUp' });
+
+  port.onMessage.fire({
+    source: 'gesturedeck', type: 'canva-controller-request', id: 'failed-key-up',
+    command: 'navigate', action: 'previous',
+  });
+  await waitFor(() => port.sent.some((message) => message.id === 'failed-key-up'));
+
+  assert.deepEqual(fake.debuggerCalls.map(({ operation, params }) => [operation, params?.type]), [
+    ['attach', undefined], ['sendCommand', 'keyDown'], ['sendCommand', 'keyUp'],
+    ['sendCommand', 'keyUp'], ['detach', undefined],
+  ]);
+  assert.deepEqual(port.sent.find((message) => message.id === 'failed-key-up'), {
+    source: 'gesturedeck-extension', type: 'canva-controller-response',
+    id: 'failed-key-up', command: 'navigate', accepted: false,
   });
 });
 
@@ -494,7 +647,7 @@ test('extension does not redirect an in-flight command to a newly selected tab',
   delayedTabLookup.resolve(fake.tab);
   await waitFor(() => port.sent.some((message) => message.id === 'old-target-next'));
 
-  assert.equal(fake.tabMessages.some(({ tabId, message }) => tabId === 8 && message.type === 'keypress'), false);
+  assert.equal(fake.debuggerCalls.some(({ target }) => target.tabId === 8), false);
   assert.deepEqual(port.sent.find((message) => message.id === 'old-target-next'), {
     source: 'gesturedeck-extension', type: 'canva-controller-response',
     id: 'old-target-next', command: 'navigate', accepted: false,
@@ -565,7 +718,7 @@ test('a presentation probe started before navigation cannot authorize editor inp
   delayedProbe.resolve({ ready: true });
   await waitFor(() => port.sent.some((message) => message.id === 'navigation-race'));
 
-  assert.equal(fake.tabMessages.some(({ message }) => message.type === 'keypress'), false);
+  assert.equal(fake.debuggerCalls.some(({ operation }) => operation === 'sendCommand'), false);
   assert.deepEqual(port.sent.find((message) => message.id === 'navigation-race'), {
     source: 'gesturedeck-extension', type: 'canva-controller-response',
     id: 'navigation-race', command: 'navigate', accepted: false,
@@ -600,9 +753,8 @@ test('extension clears a Canva target after the selected tab reloads without its
   });
 });
 
-test('Canva content script dispatches only ArrowLeft and ArrowRight in presentation routes', async () => {
+test('Canva content script reports presentation readiness without synthetic keyboard input', async () => {
   const source = await readFile(new URL('../extension/content/canva-content.js', import.meta.url), 'utf8');
-  const events = [];
   const messages = [];
   const handlers = [];
   const location = { pathname: '/design/deck-1/present' };
@@ -613,10 +765,7 @@ test('Canva content script dispatches only ArrowLeft and ArrowRight in presentat
       sendMessage: (message) => { messages.push(message); return Promise.resolve(); },
     } },
     window: { addEventListener() {} },
-    document: { addEventListener() {}, dispatchEvent: (event) => events.push(event) },
-    KeyboardEvent: class {
-      constructor(type, options) { this.type = type; Object.assign(this, options); }
-    },
+    document: { addEventListener() {} },
   };
   context.globalThis = context;
   runInNewContext(source, context);
@@ -627,15 +776,8 @@ test('Canva content script dispatches only ArrowLeft and ArrowRight in presentat
   };
 
   assert.equal(receive({ type: 'probe' }).ready, true);
-  const delivered = receive({ type: 'keypress', key: 'ArrowRight' });
-  assert.equal(delivered.accepted, true);
-  assert.equal(delivered.ready, true);
-  assert.deepEqual(events.map(({ type, key }) => [type, key]), [
-    ['keydown', 'ArrowRight'], ['keyup', 'ArrowRight'],
-  ]);
+  assert.equal(receive({ type: 'keypress', key: 'ArrowRight' }), undefined);
   location.pathname = '/design/deck-1/edit';
-  const refused = receive({ type: 'keypress', key: 'ArrowLeft' });
-  assert.equal(refused.accepted, false);
-  assert.equal(refused.ready, false);
-  assert.equal(events.length, 2);
+  assert.equal(receive({ type: 'probe' }).ready, false);
+  assert.equal(messages.some(({ type }) => type === 'target-readiness'), true);
 });

@@ -19,6 +19,7 @@ export function createCanvaExtensionWorker(chromeApi) {
   let connectionAttempt = 0;
   let targetLoading = false;
   let targetStorageWrite = Promise.resolve();
+  let navigationDispatch = Promise.resolve();
   const controllerPorts = new Set();
   const restoring = chromeApi.storage.session.get(TARGET_KEY).then((state) => {
     targetTabId = Number.isInteger(state?.[TARGET_KEY]) ? state[TARGET_KEY] : undefined;
@@ -122,6 +123,42 @@ export function createCanvaExtensionWorker(chromeApi) {
     }
   }
 
+  async function dispatchCanvaKeyNow(tabId, key, isCurrentTarget) {
+    if (!isCurrentTarget()) return false;
+    const target = { tabId };
+    const keyCode = key === 'ArrowLeft' ? 37 : 39;
+    const keyEvent = (type) => ({
+      type,
+      key,
+      code: key,
+      windowsVirtualKeyCode: keyCode,
+    });
+    await chromeApi.debugger.attach(target, '1.3');
+    let keyDownAttempted = false;
+    let keyUpSent = false;
+    try {
+      if (!isCurrentTarget()) return false;
+      keyDownAttempted = true;
+      await chromeApi.debugger.sendCommand(target, 'Input.dispatchKeyEvent', keyEvent('keyDown'));
+      await chromeApi.debugger.sendCommand(target, 'Input.dispatchKeyEvent', keyEvent('keyUp'));
+      keyUpSent = true;
+      return isCurrentTarget();
+    } finally {
+      if (keyDownAttempted && !keyUpSent) {
+        await chromeApi.debugger.sendCommand(target, 'Input.dispatchKeyEvent', keyEvent('keyUp')).catch(() => {});
+      }
+      await chromeApi.debugger.detach(target).catch(() => {});
+    }
+  }
+
+  function dispatchCanvaKey(tabId, key, isCurrentTarget) {
+    const operation = navigationDispatch.then(
+      () => dispatchCanvaKeyNow(tabId, key, isCurrentTarget),
+    );
+    navigationDispatch = operation.catch(() => false);
+    return operation;
+  }
+
   async function handleControllerRequest(port, message) {
     if (!isGestureDeckControllerUrl(port.sender?.url) || !isControllerRequest(message)) return;
     if (message.command === 'status') {
@@ -138,11 +175,8 @@ export function createCanvaExtensionWorker(chromeApi) {
     const key = presentationKeyForAction(message.action);
     if (state.ready && key && generation === targetGeneration && tabId === targetTabId) {
       try {
-        const result = await chromeApi.tabs.sendMessage(tabId, {
-          type: 'keypress', key,
-        });
-        accepted = result?.accepted === true && result?.ready === true
-          && generation === targetGeneration && tabId === targetTabId;
+        accepted = await dispatchCanvaKey(tabId, key,
+          () => generation === targetGeneration && tabId === targetTabId);
       } catch { accepted = false; }
     }
     post(port, {

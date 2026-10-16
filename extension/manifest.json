@@ -3,7 +3,7 @@
   "name": "GestureDeck Canva Phone Remote",
   "version": "0.1.0",
   "description": "Pair a local phone remote with one Canva presentation tab.",
-  "permissions": ["activeTab", "scripting", "storage"],
+  "permissions": ["activeTab", "debugger", "scripting", "storage"],
   "action": { "default_popup": "popup/popup.html" },
   "background": { "service_worker": "background/service-worker.js", "type": "module" },
   "content_scripts": [
