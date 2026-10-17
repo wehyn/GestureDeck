@@ -35,7 +35,7 @@ The presenter can remove one phone or disconnect everyone. Each phone can discon
 
 ### Use a phone with live Canva
 
-1. In Chrome, open `chrome://extensions`, turn on **Developer mode**, choose **Load unpacked**, and select this repository's `extension/` folder. Reload the extension after updating it and accept Chrome's debugger permission warning. This incomplete control method uses Chrome's debugger API, so Chrome displays its native “started debugging this browser” banner while it is attached.
+1. In Chrome, open `chrome://extensions`, turn on **Developer mode**, choose **Load unpacked**, and select this repository's `extension/` folder. Reload the extension after updating it.
 2. Open a Canva design in **Present** or **View** mode. Open the GestureDeck extension and choose **Connect this presentation**.
 3. For local pairing, follow [Use the local phone remote](#use-the-local-phone-remote).
 4. For hosted pairing, choose **Show phone QR/link** in the extension popup. The extension opens the hosted workspace at `https://gesturedeck-two.vercel.app/workspace.html?experience=cloud&connect=phone`; scan its QR code or copy the link.
