@@ -84,7 +84,12 @@ function fakeChrome(activeTabUrl) {
         const selected = tabsById.get(tabId);
         if (!selected) throw new Error('missing tab');
         if (message.type === 'probe') return { ready: isCanvaPresentationUrl(selected.url) };
-        return { accepted: true, ready: isCanvaPresentationUrl(selected.url) };
+        if (message.type === 'keypress') return {
+          accepted: isCanvaPresentationUrl(selected.url)
+            && ['ArrowLeft', 'ArrowRight'].includes(message.key),
+          ready: isCanvaPresentationUrl(selected.url),
+        };
+        return undefined;
       },
     },
     scripting: { async executeScript(details) { injections.push(details); } },
@@ -402,7 +407,7 @@ test('extension bridge drops stale readiness when status or navigation requests 
   bridge.close();
 });
 
-test('extension binds only a presentation tab and routes phone navigation to that tab', async () => {
+test('extension sends phone navigation to the selected Canva tab without debugger input', async () => {
   const fake = fakeChrome('https://www.canva.com/design/deck-1/present');
   createCanvaExtensionWorker(fake.chromeApi);
   assert.deepEqual(await connectToActivePopupTab(fake.chromeApi), {
@@ -418,12 +423,26 @@ test('extension binds only a presentation tab and routes phone navigation to tha
     command: 'navigate', action: 'next',
   });
   await waitFor(() => port.sent.some((message) => message.id === 'next-1'));
-  assert.deepEqual(fake.tabMessages.find(({ message }) => message.type === 'keypress'), {
-    tabId: 7, message: { type: 'keypress', key: 'ArrowRight' },
-  });
+  assert.deepEqual(fake.tabMessages.filter(({ message }) => message.type === 'keypress'), [
+    { tabId: 7, message: { type: 'keypress', key: 'ArrowRight' } },
+  ]);
   assert.deepEqual(port.sent.find((message) => message.id === 'next-1'), {
     source: 'gesturedeck-extension', type: 'canva-controller-response',
     id: 'next-1', command: 'navigate', accepted: true,
+  });
+
+  port.onMessage.fire({
+    source: 'gesturedeck', type: 'canva-controller-request', id: 'previous-1',
+    command: 'navigate', action: 'previous',
+  });
+  await waitFor(() => port.sent.some((message) => message.id === 'previous-1'));
+  assert.deepEqual(fake.tabMessages.filter(({ message }) => message.type === 'keypress'), [
+    { tabId: 7, message: { type: 'keypress', key: 'ArrowRight' } },
+    { tabId: 7, message: { type: 'keypress', key: 'ArrowLeft' } },
+  ]);
+  assert.deepEqual(port.sent.find((message) => message.id === 'previous-1'), {
+    source: 'gesturedeck-extension', type: 'canva-controller-response',
+    id: 'previous-1', command: 'navigate', accepted: true,
   });
 });
 
@@ -600,10 +619,10 @@ test('extension clears a Canva target after the selected tab reloads without its
   });
 });
 
-test('Canva content script dispatches only ArrowLeft and ArrowRight in presentation routes', async () => {
+test('Canva content script dispatches arrow keys only on presentation routes', async () => {
   const source = await readFile(new URL('../extension/content/canva-content.js', import.meta.url), 'utf8');
-  const events = [];
   const messages = [];
+  const events = [];
   const handlers = [];
   const location = { pathname: '/design/deck-1/present' };
   const context = {
@@ -627,15 +646,18 @@ test('Canva content script dispatches only ArrowLeft and ArrowRight in presentat
   };
 
   assert.equal(receive({ type: 'probe' }).ready, true);
-  const delivered = receive({ type: 'keypress', key: 'ArrowRight' });
-  assert.equal(delivered.accepted, true);
-  assert.equal(delivered.ready, true);
+  const dispatched = receive({ type: 'keypress', key: 'ArrowRight' });
+  assert.equal(dispatched.accepted, true);
+  assert.equal(dispatched.ready, true);
   assert.deepEqual(events.map(({ type, key }) => [type, key]), [
     ['keydown', 'ArrowRight'], ['keyup', 'ArrowRight'],
   ]);
+  assert.equal(receive({ type: 'keypress', key: 'Home' }), undefined);
   location.pathname = '/design/deck-1/edit';
-  const refused = receive({ type: 'keypress', key: 'ArrowLeft' });
-  assert.equal(refused.accepted, false);
-  assert.equal(refused.ready, false);
+  assert.equal(receive({ type: 'probe' }).ready, false);
+  const rejected = receive({ type: 'keypress', key: 'ArrowLeft' });
+  assert.equal(rejected.accepted, false);
+  assert.equal(rejected.ready, false);
   assert.equal(events.length, 2);
+  assert.equal(messages.some(({ type }) => type === 'target-readiness'), true);
 });

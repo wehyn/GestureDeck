@@ -12,6 +12,7 @@ const CLOSE_CODE_UNSUPPORTED_DATA = 1003;
 const CLOSE_CODE_INVALID_DATA = 1007;
 const CLOSE_CODE_TOO_LARGE = 1009;
 const CLOSE_CODE_SERVER_ERROR = 1011;
+const upgradeRegistries = new WeakMap();
 
 function isValidCloseCode(code) {
   return Number.isInteger(code)
@@ -62,6 +63,37 @@ function isValidWebSocketKey(key) {
   return decoded.length === 16 && decoded.toString('base64') === key;
 }
 
+function getUpgradeRegistry(server) {
+  let registry = upgradeRegistries.get(server);
+  if (registry) return registry;
+
+  const routes = new Map();
+  const onUpgrade = (request, socket, head) => {
+    const requestTarget = request.url ?? '';
+    const route = [...routes.values()].find(({ path }) =>
+      requestTarget === path || requestTarget.startsWith(`${path}?`));
+    if (!route) {
+      sendHttpError(socket, 404, 'Not Found');
+      return;
+    }
+    route.handleUpgrade(request, socket, head);
+  };
+
+  registry = { routes, onUpgrade };
+  upgradeRegistries.set(server, registry);
+  server.on('upgrade', onUpgrade);
+  return registry;
+}
+
+function removeUpgradeRoute(server, registry, path, route) {
+  if (registry.routes.get(path) !== route) return;
+  registry.routes.delete(path);
+  if (registry.routes.size === 0) {
+    server.off('upgrade', registry.onUpgrade);
+    upgradeRegistries.delete(server);
+  }
+}
+
 /**
  * Attach a small RFC 6455 JSON server to an existing Node HTTP server.
  *
@@ -102,15 +134,7 @@ export function attachWebSocketServer(server, {
   }
 
   const activeConnections = new Set();
-
-  const onUpgrade = (request, socket, head) => {
-    const requestTarget = request.url ?? '';
-    const routeMatches = requestTarget === path || requestTarget.startsWith(`${path}?`);
-    if (!routeMatches) {
-      sendHttpError(socket, 404, 'Not Found');
-      return;
-    }
-
+  const handleUpgrade = (request, socket, head) => {
     let authorized = false;
     try {
       authorized = verifyRequest(request) === true;
@@ -150,12 +174,17 @@ export function attachWebSocketServer(server, {
     } catch {
       connection.close(CLOSE_CODE_SERVER_ERROR, 'Connection setup failed');
     }
-    if (head.length > 0) receive(head);
+    if (head?.length > 0) receive(head);
   };
 
-  server.on('upgrade', onUpgrade);
+  const registry = getUpgradeRegistry(server);
+  if (registry.routes.has(path)) {
+    throw new TypeError(`WebSocket route is already registered: ${path}`);
+  }
+  const route = { path, handleUpgrade };
+  registry.routes.set(path, route);
   return () => {
-    server.off('upgrade', onUpgrade);
+    removeUpgradeRoute(server, registry, path, route);
     for (const connection of activeConnections) {
       connection.close(1001, 'Server shutting down');
     }

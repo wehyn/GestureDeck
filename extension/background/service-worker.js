@@ -138,9 +138,8 @@ export function createCanvaExtensionWorker(chromeApi) {
     const key = presentationKeyForAction(message.action);
     if (state.ready && key && generation === targetGeneration && tabId === targetTabId) {
       try {
-        const result = await chromeApi.tabs.sendMessage(tabId, {
-          type: 'keypress', key,
-        });
+        // Keep navigation tab-scoped without attaching Chrome's debugger.
+        const result = await chromeApi.tabs.sendMessage(tabId, { type: 'keypress', key });
         accepted = result?.accepted === true && result?.ready === true
           && generation === targetGeneration && tabId === targetTabId;
       } catch { accepted = false; }

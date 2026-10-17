@@ -440,6 +440,58 @@ test('in-process upgrade rejects unexpected paths and unauthorized peers and lea
   assert.ok(extended.connection);
 });
 
+test('shared upgrade dispatcher routes each WebSocket path once and rejects unknown paths once', () => {
+  const server = new EventEmitter();
+  const connections = [];
+  const detachMobile = attachWebSocketServer(server, {
+    path: '/ws/mobile-remote/presenter',
+    closeTimeoutMs: 0,
+    verifyRequest: () => true,
+    onConnection: (connection) => connections.push({ path: 'mobile', connection }),
+  });
+  const detachCloud = attachWebSocketServer(server, {
+    path: '/ws/cloud-remote/presenter',
+    closeTimeoutMs: 0,
+    verifyRequest: () => true,
+    onConnection: (connection) => connections.push({ path: 'cloud', connection }),
+  });
+  const makeRequest = (url) => ({
+    url,
+    method: 'GET',
+    headers: {
+      host: '127.0.0.1',
+      upgrade: 'websocket',
+      connection: 'keep-alive, Upgrade',
+      'sec-websocket-version': '13',
+      'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
+      origin: 'http://localhost',
+    },
+  });
+
+  try {
+    const mobileSocket = new MemorySocket();
+    server.emit('upgrade', makeRequest('/ws/mobile-remote/presenter'), mobileSocket, Buffer.alloc(0));
+    assert.match(mobileSocket.writes[0].toString(), /^HTTP\/1\.1 101 Switching Protocols/);
+    assert.equal(mobileSocket.writes.length, 1);
+    assert.deepEqual(connections.map(({ path }) => path), ['mobile']);
+
+    const cloudSocket = new MemorySocket();
+    server.emit('upgrade', makeRequest('/ws/cloud-remote/presenter'), cloudSocket, Buffer.alloc(0));
+    assert.match(cloudSocket.writes[0].toString(), /^HTTP\/1\.1 101 Switching Protocols/);
+    assert.equal(cloudSocket.writes.length, 1);
+    assert.deepEqual(connections.map(({ path }) => path), ['mobile', 'cloud']);
+
+    const unknownSocket = new MemorySocket();
+    server.emit('upgrade', makeRequest('/ws/unknown'), unknownSocket, Buffer.alloc(0));
+    assert.match(unknownSocket.writes[0].toString(), /^HTTP\/1\.1 404 Not Found/);
+    assert.equal(unknownSocket.writes.length, 1);
+    assert.equal(connections.length, 2);
+  } finally {
+    detachMobile();
+    detachCloud();
+  }
+});
+
 test('in-process parser closes invalid frames and oversized text with protocol codes', () => {
   for (const frame of [
     makeClientFrame(0x1, '{"type":"next"}', { masked: false }),
