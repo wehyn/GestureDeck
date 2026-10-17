@@ -23,6 +23,7 @@
     }
     const key = message.key;
     try {
+      // These synthetic keyboard events are untrusted and Canva may ignore them.
       for (const type of ['keydown', 'keyup']) {
         document.dispatchEvent(new KeyboardEvent(type, {
           key, code: key, bubbles: true, cancelable: true,
