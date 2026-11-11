@@ -15,24 +15,6 @@
       sendResponse({ ready: isPresentationMode() });
       return false;
     }
-    if (message?.type !== 'keypress' || !['ArrowLeft', 'ArrowRight'].includes(message.key)) return false;
-    if (!isPresentationMode()) {
-      reportReadiness();
-      sendResponse({ accepted: false, ready: false });
-      return false;
-    }
-    const key = message.key;
-    try {
-      // These synthetic keyboard events are untrusted and Canva may ignore them.
-      for (const type of ['keydown', 'keyup']) {
-        document.dispatchEvent(new KeyboardEvent(type, {
-          key, code: key, bubbles: true, cancelable: true,
-        }));
-      }
-      sendResponse({ accepted: true, ready: true });
-    } catch {
-      sendResponse({ accepted: false, ready: isPresentationMode() });
-    }
     return false;
   });
 
