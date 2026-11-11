@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f5f3ed">
-    <meta name="description" content="Present the sample deck or a PDF from your browser, with optional phone and gesture controls.">
+    <meta name="description" content="Present the sample deck or a PDF, controlled by your keyboard or phone.">
     <title>GestureDeck — Presentation workspace</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="styles.css">
@@ -32,21 +32,7 @@
           <div class="welcome-copy">
             <p class="eyebrow">PRESENTATION WORKSPACE</p>
             <h1 id="page-title">Your next presentation.</h1>
-            <p class="welcome-description">Choose a deck, then start gestures when you’re ready.</p>
-          </div>
-          <div class="privacy-notice" role="status" aria-live="polite" aria-atomic="true">
-            <span class="notice-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" focusable="false">
-                <rect x="5" y="10" width="14" height="10" rx="2" />
-                <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-                <path d="M12 14v2" />
-              </svg>
-            </span>
-            <span class="notice-copy">
-              <strong id="camera-status" aria-live="polite">Camera off</strong>
-              <span id="camera-status-copy">Nothing is being captured.</span>
-            </span>
-            <span id="camera-status-badge" class="notice-check" aria-hidden="true">OFF</span>
+            <p class="welcome-description">Choose a deck, then present with your keyboard or phone.</p>
           </div>
         </section>
 
@@ -126,14 +112,13 @@
             </div>
           </section>
 
-          <aside class="control-column" aria-label="Presentation setup and controls">
+          <aside class="control-column" aria-label="Presentation controls">
             <section class="session-panel" aria-labelledby="session-heading">
               <div class="panel-heading session-heading-row">
                 <div>
-                  <p class="eyebrow">GET STARTED</p>
+                  <p class="eyebrow">PRESENTATION</p>
                   <h2 id="session-heading">Choose a deck</h2>
                 </div>
-                <span class="session-state"><span class="state-dot" aria-hidden="true"></span><span id="session-state">IDLE</span></span>
               </div>
 
               <div class="deck-choices" role="group" aria-label="Choose a presentation">
@@ -155,113 +140,9 @@
                 <input id="pdf-file" type="file" accept=".pdf,application/pdf" hidden aria-label="Choose a PDF presentation">
               </div>
 
-              <p id="session-message" class="session-message" role="status" aria-live="polite" aria-atomic="true" hidden>Camera off.</p>
-
-              <div class="session-actions">
-                <button id="start-setup" class="button button-primary setup-button" type="button">
-                  <span>Start setup</span>
-                  <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M4 10h11M10 5l5 5-5 5" /></svg>
-                </button>
-                <button id="start-session" class="button button-primary setup-button" type="button" hidden>Start session</button>
-                <div class="session-action-row">
-                  <button id="pause-session" class="button button-secondary action-button" type="button" hidden>Pause</button>
-                  <button id="resume-session" class="button button-primary action-button" type="button" hidden>Resume</button>
-                  <button id="stop-session" class="button button-quiet action-button" type="button" hidden>Stop session</button>
-                </div>
-                <p id="setup-hint" class="setup-hint">Start setup to test two swipes.</p>
-              </div>
-
-              <div id="camera-card" class="camera-card" hidden>
-                <div class="camera-card-heading">
-                  <span class="camera-label">CAMERA PREVIEW</span>
-                  <button id="preview-toggle" class="preview-toggle" type="button" aria-pressed="false" hidden disabled>Show preview</button>
-                </div>
-                <div class="camera-stage">
-                  <video id="camera-preview" playsinline muted aria-label="Live camera preview" hidden></video>
-                  <canvas id="hand-overlay" class="hand-overlay" aria-hidden="true" hidden></canvas>
-                  <div id="camera-idle" class="camera-idle" aria-hidden="true">
-                    <span class="camera-glyph"><span></span></span>
-                    <span id="camera-idle-title" class="camera-idle-title">Preview is off</span>
-                    <span id="camera-idle-copy" class="camera-idle-copy">Start setup when you’re ready.</span>
-                  </div>
-                  <span id="preview-off-label" class="preview-off-label"><span aria-hidden="true"></span> CAMERA OFF</span>
-                </div>
-                <div id="camera-diagnostics" class="camera-diagnostics" role="group" aria-label="Live gesture guidance" aria-live="off" hidden>
-                  <div class="camera-diagnostics-heading">
-                    <span id="diagnostic-status-dot" class="camera-diagnostics-dot" data-state="searching" aria-hidden="true"></span>
-                    <span id="diagnostic-tracking" class="camera-diagnostics-state">Searching for hand</span>
-                    <span class="camera-diagnostics-local">ON DEVICE</span>
-                  </div>
-                  <div class="camera-diagnostics-metrics">
-                    <div class="camera-diagnostic-metric"><span>Position</span><strong id="diagnostic-position">—</strong></div>
-                    <div class="camera-diagnostic-metric"><span>Gesture</span><strong id="diagnostic-gesture">Waiting for hand</strong></div>
-                    <div class="camera-diagnostic-metric"><span>Travel</span><strong id="diagnostic-travel">0% / 14%</strong></div>
-                    <div class="camera-diagnostic-metric"><span>Latency / FPS</span><strong id="diagnostic-frame-time">—</strong></div>
-                  </div>
-                  <div id="diagnostic-progress" class="camera-diagnostics-progress" role="progressbar" aria-label="Swipe distance progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-                    <span id="diagnostic-progress-fill"></span>
-                  </div>
-                  <p id="diagnostic-hint" class="camera-diagnostics-hint">Left swipe advances · right swipe goes back</p>
-                </div>
-                <div id="camera-picker" class="camera-picker" hidden>
-                  <label for="camera-selection">Camera</label>
-                  <select id="camera-selection" name="camera-selection" disabled>
-                    <option value="">Default camera</option>
-                  </select>
-                </div>
-                <p class="camera-footnote">Preview stays on this device. No video is saved or uploaded.</p>
-              </div>
-
-              <dl id="status-list" class="status-list" aria-label="Session status" aria-live="polite" hidden>
-                <div class="status-row">
-                  <dt><span class="status-symbol status-symbol-camera" aria-hidden="true"></span>Camera</dt>
-                  <dd id="camera-status-detail">Off</dd>
-                </div>
-                <div class="status-row">
-                  <dt><span class="status-symbol status-symbol-hand" aria-hidden="true"></span>Hand tracking</dt>
-                  <dd id="hand-status" aria-live="polite">Not started</dd>
-                </div>
-                <div class="status-row">
-                  <dt><span class="status-symbol status-symbol-target" aria-hidden="true"></span>Target app</dt>
-                  <dd id="target-status">Sample deck · browser demo</dd>
-                </div>
-              </dl>
-
-              <p id="error-message" class="error-message" role="alert" aria-live="assertive" hidden></p>
-              <p id="gesture-toast" class="gesture-toast" role="status" aria-live="polite" aria-atomic="true" hidden></p>
-
-              <details class="advanced-settings">
-                <summary>Advanced settings</summary>
-                <div class="session-settings" aria-label="Gesture settings">
-                  <div class="settings-heading">
-                    <span class="settings-title">Gesture settings</span>
-                    <span class="settings-note">Saved on this device</span>
-                  </div>
-                  <label class="sensitivity-control" for="gesture-sensitivity">
-                    <span class="sensitivity-label">Swipe threshold <output id="gesture-sensitivity-value" for="gesture-sensitivity" aria-live="polite">14%</output></span>
-                    <input id="gesture-sensitivity" type="range" min="10" max="32" step="1" value="14" aria-label="Gesture sensitivity">
-                  </label>
-                  <button id="reverse-mapping" class="button button-secondary mapping-button" type="button" aria-pressed="false">Reverse swipes: off</button>
-                  <button id="reset-settings" class="button button-secondary mapping-button" type="button">Reset settings</button>
-                </div>
-              </details>
+              <p id="action-toast" class="action-toast" role="status" aria-live="polite" aria-atomic="true" hidden></p>
             </section>
 
-            <section class="gesture-guide" aria-labelledby="gesture-heading">
-              <div class="guide-heading">
-                <div>
-                  <p class="eyebrow">THREE STEPS</p>
-                  <h2 id="gesture-heading">You’re ready.</h2>
-                </div>
-                <span class="guide-symbol" aria-hidden="true">03</span>
-              </div>
-              <ol class="quick-steps">
-                <li><span>1</span>Choose a deck</li>
-                <li><span>2</span>Start gesture setup</li>
-                <li><span>3</span>Present hands-free</li>
-              </ol>
-              <p class="gesture-map"><span id="left-gesture-result">Swipe left · next</span><span id="right-gesture-result">Swipe right · previous</span></p>
-            </section>
           </aside>
         </div>
 

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Local-first webcam gesture controller for presentations",
+  "description": "Local-first browser presentation controller for sample decks and PDFs",
   "scripts": {
     "dev": "node server.mjs",
     "build:vercel": "node scripts/build-vercel.mjs",
